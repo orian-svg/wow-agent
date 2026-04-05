@@ -17,6 +17,7 @@ let tokenExpiry = 0;
 async function getGuestyToken() {
     if (guestyToken && Date.now() < tokenExpiry)
         return guestyToken;
+    console.log("Getting new Guesty token...");
     const params = new URLSearchParams();
     params.append("grant_type", "client_credentials");
     params.append("scope", "open-api");
@@ -25,12 +26,17 @@ async function getGuestyToken() {
     const res = await fetch("https://open-api.guesty.com/oauth2/token", {
         method: "POST",
         headers: {
-            "Accept": "application/json",
+            Accept: "application/json",
             "Content-Type": "application/x-www-form-urlencoded",
         },
         body: params,
     });
     const data = await res.json();
+    if (!data.access_token) {
+        console.error("Failed to get token:", JSON.stringify(data));
+        return "";
+    }
+    console.log("Got Guesty token successfully");
     guestyToken = data.access_token ?? "";
     tokenExpiry = Date.now() + ((data.expires_in ?? 3600) - 60) * 1000;
     return guestyToken;
@@ -63,6 +69,7 @@ async function getRecentReservations() {
         console.error("Guesty reservations error:", JSON.stringify(data));
         return [];
     }
+    console.log(`Found ${data.results?.length ?? 0} reservations`);
     return data.results ?? [];
 }
 async function getReservationMessages(reservationId) {
@@ -75,10 +82,17 @@ async function getReservationMessages(reservationId) {
             "Content-Type": "application/json",
         },
     });
+    const text = await res.text();
+    console.log(`Messages response for ${reservationId}: status=${res.status}, body=${text.substring(0, 200)}`);
     if (!res.ok)
         return [];
-    const data = await res.json();
-    return data.messages ?? [];
+    try {
+        const data = JSON.parse(text);
+        return data.messages ?? data ?? [];
+    }
+    catch {
+        return [];
+    }
 }
 function getStayStatus(checkIn, checkOut) {
     const now = new Date();
@@ -110,13 +124,12 @@ async function analyzeConversation(reservation, messages) {
     const conversation = messages
         .map((m) => `${m.senderType}: ${m.body}`)
         .join("\n");
-    const prompt = `
-You are a WOW hospitality agent for O&O Group, a vacation rental company.
+    const prompt = `You are a WOW hospitality agent for O&O Group, a vacation rental company.
 
-Your philosophy is rooted in "Unreasonable Hospitality" by Will Guidara and Tony Hsieh's approach:
-- A WOW moment comes from LISTENING to what the guest actually said — not from guessing based on their name, nationality, or dates.
-- The hot dog story: the guest MENTIONED they never had a New York hot dog. That's what made the gesture possible. Without that detail, there would be no gesture.
-- If the guest hasn't revealed anything personal, there is NO opportunity. Silence is the right answer.
+Your philosophy is rooted in "Unreasonable Hospitality" by Will Guidara and Tony Hsieh's approach.
+A WOW moment comes from LISTENING to what the guest actually said — not from guessing based on their name, nationality, or dates.
+The hot dog story: the guest MENTIONED they never had a New York hot dog. That's what made the gesture possible. Without that detail, there would be no gesture.
+If the guest hasn't revealed anything personal, there is NO opportunity. Silence is the right answer.
 
 Guest: ${guestName}
 Property: ${listing}
@@ -126,7 +139,7 @@ Stay status: ${stayStatus}
 Booking source: ${source}
 
 Conversation history (this is your ONLY source of truth):
-${conversation || "No messages yet."}
+${conversation || "No messages yet"}
 
 STRICT RULES:
 1. Only identify an opportunity if the guest explicitly mentioned something personal in the conversation — a special occasion, a preference, a fear, a dream, a reason for the trip, something they love or miss.
@@ -159,11 +172,14 @@ async function pollGuesty() {
             const messages = await getReservationMessages(id);
             const messageCount = messages.length;
             const hasNewMessages = lastMessageCount[id] !== messageCount;
+            console.log(`Reservation ${id}: isNew=${isNew}, messages=${messageCount}, hasNewMessages=${hasNewMessages}`);
             if (!isNew && !hasNewMessages)
                 continue;
             processedReservations.add(id);
             lastMessageCount[id] = messageCount;
+            console.log(`Analyzing reservation ${id} (${reservation.guest?.fullName})...`);
             const analysis = await analyzeConversation(reservation, messages);
+            console.log(`Analysis for ${id}: ${analysis.substring(0, 100)}`);
             if (!analysis.includes("OPPORTUNITY: yes"))
                 continue;
             const guestName = reservation.guest?.fullName ?? "Guest";
@@ -175,8 +191,7 @@ async function pollGuesty() {
             const channel = getChannel(listing);
             const what = analysis.match(/WHAT:(.*?)(?=WHY:|$)/s)?.[1]?.trim() ?? "";
             const why = analysis.match(/WHY:(.*?)$/s)?.[1]?.trim() ?? "";
-            const message = `
-🌟 *WOW Opportunity*
+            const message = `*WOW Opportunity* 🌟
 
 *שם אורח:* ${guestName}
 *תאריכי שהייה:* ${checkIn} → ${checkOut}
@@ -187,8 +202,7 @@ async function pollGuesty() {
 ${what}
 
 *למה זו הזדמנות:*
-${why}
-`.trim();
+${why}`.trim();
             await sendSlackMessage(channel, message);
             console.log(`Sent to ${channel} — ${guestName}`);
         }

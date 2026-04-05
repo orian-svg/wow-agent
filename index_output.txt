@@ -240,46 +240,6 @@ ${why}`.trim();
   }
 }
 
-app.post("/webhook", async (req: Request, res: Response) => {
-  res.sendStatus(200);
-
-  try {
-    const event = req.body;
-    const reservationId = event.data?.reservationId ?? event.reservationId;
-    if (!reservationId) return;
-
-    console.log(`Webhook received for reservation ${reservationId}`);
-
-    const token = await getGuestyToken();
-    const resData = await fetch(
-      `https://open-api.guesty.com/v1/reservations/${reservationId}`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    const reservation = await resData.json() as any;
-    const messages = await getReservationMessages(reservationId);
-
-    const analysis = await analyzeConversation(reservation, messages);
-    if (!analysis.includes("OPPORTUNITY: yes")) return;
-
-    const guestName = reservation.guest?.fullName ?? "Guest";
-    const checkIn = reservation.checkIn ?? "";
-    const checkOut = reservation.checkOut ?? "";
-    const listing = reservation.listing?.title ?? "";
-    const source = reservation.source ?? reservation.channel ?? "Unknown";
-    const stayStatus = getStayStatus(checkIn, checkOut);
-    const channel = getChannel(listing);
-
-    const what = analysis.match(/WHAT:(.*?)(?=WHY:|$)/s)?.[1]?.trim() ?? "";
-    const why = analysis.match(/WHY:(.*?)$/s)?.[1]?.trim() ?? "";
-
-    const message = `*WOW Opportunity* 🌟\n\n*שם אורח:* ${guestName}\n*תאריכי שהייה:* ${checkIn} → ${checkOut}\n*סטטוס:* ${stayStatus}\n*ספק:* ${source}\n\n*מה ההזדמנות:*\n${what}\n\n*למה זו הזדמנות:*\n${why}`.trim();
-
-    await sendSlackMessage(channel, message);
-    console.log(`Sent to ${channel} — ${guestName}`);
-  } catch (err) {
-    console.error("Webhook error:", err);
-  }
-});
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "ok" });
 });
