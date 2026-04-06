@@ -76,23 +76,14 @@ async function getReservationMessages(reservationId) {
     const token = await getGuestyToken();
     if (!token)
         return [];
-    const res = await fetch(`https://open-api.guesty.com/v1/reservations/${reservationId}/messages`, {
-        headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-        },
-    });
-    const text = await res.text();
-    console.log(`Messages response for ${reservationId}: status=${res.status}, body=${text.substring(0, 200)}`);
-    if (!res.ok)
+    const resRes = await fetch(`https://open-api.guesty.com/v1/reservations/${reservationId}?fields=conversationId`, { headers: { Authorization: `Bearer ${token}` } });
+    const resData = await resRes.json();
+    const conversationId = resData.conversationId;
+    if (!conversationId)
         return [];
-    try {
-        const data = JSON.parse(text);
-        return data.messages ?? data ?? [];
-    }
-    catch {
-        return [];
-    }
+    const msgRes = await fetch(`https://open-api.guesty.com/v1/communication/conversations/${conversationId}`, { headers: { Authorization: `Bearer ${token}` } });
+    const msgData = await msgRes.json();
+    return msgData.messages ?? [];
 }
 function getStayStatus(checkIn, checkOut) {
     const now = new Date();
@@ -211,6 +202,38 @@ ${why}`.trim();
         console.error("Polling error:", err);
     }
 }
+app.post("/webhook", async (req, res) => {
+    res.sendStatus(200);
+    try {
+        const event = req.body;
+        const reservationId = event.data?.reservationId ?? event.reservationId;
+        if (!reservationId)
+            return;
+        console.log(`Webhook received for reservation ${reservationId}`);
+        const token = await getGuestyToken();
+        const resData = await fetch(`https://open-api.guesty.com/v1/reservations/${reservationId}`, { headers: { Authorization: `Bearer ${token}` } });
+        const reservation = await resData.json();
+        const messages = await getReservationMessages(reservationId);
+        const analysis = await analyzeConversation(reservation, messages);
+        if (!analysis.includes("OPPORTUNITY: yes"))
+            return;
+        const guestName = reservation.guest?.fullName ?? "Guest";
+        const checkIn = reservation.checkIn ?? "";
+        const checkOut = reservation.checkOut ?? "";
+        const listing = reservation.listing?.title ?? "";
+        const source = reservation.source ?? reservation.channel ?? "Unknown";
+        const stayStatus = getStayStatus(checkIn, checkOut);
+        const channel = getChannel(listing);
+        const what = analysis.match(/WHAT:(.*?)(?=WHY:|$)/s)?.[1]?.trim() ?? "";
+        const why = analysis.match(/WHY:(.*?)$/s)?.[1]?.trim() ?? "";
+        const message = `*WOW Opportunity* 🌟\n\n*שם אורח:* ${guestName}\n*תאריכי שהייה:* ${checkIn} → ${checkOut}\n*סטטוס:* ${stayStatus}\n*ספק:* ${source}\n\n*מה ההזדמנות:*\n${what}\n\n*למה זו הזדמנות:*\n${why}`.trim();
+        await sendSlackMessage(channel, message);
+        console.log(`Sent to ${channel} — ${guestName}`);
+    }
+    catch (err) {
+        console.error("Webhook error:", err);
+    }
+});
 app.get("/health", (_req, res) => {
     res.json({ status: "ok" });
 });
