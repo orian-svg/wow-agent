@@ -84,27 +84,20 @@ async function getReservationMessages(reservationId: string) {
   const token = await getGuestyToken();
   if (!token) return [];
 
-  const res = await fetch(
-    `https://open-api.guesty.com/v1/reservations/${reservationId}/messages`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-    }
+  const resRes = await fetch(
+    `https://open-api.guesty.com/v1/reservations/${reservationId}?fields=conversationId`,
+    { headers: { Authorization: `Bearer ${token}` } }
   );
+  const resData = await resRes.json() as any;
+  const conversationId = resData.conversationId;
+  if (!conversationId) return [];
 
-  const text = await res.text();
-  console.log(`Messages response for ${reservationId}: status=${res.status}, body=${text.substring(0, 200)}`);
-
-  if (!res.ok) return [];
-
-  try {
-    const data = JSON.parse(text) as any;
-    return data.messages ?? data ?? [];
-  } catch {
-    return [];
-  }
+  const msgRes = await fetch(
+    `https://open-api.guesty.com/v1/communication/conversations/${conversationId}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  const msgData = await msgRes.json() as any;
+  return msgData.messages ?? [];
 }
 
 function getStayStatus(checkIn: string, checkOut: string): string {
