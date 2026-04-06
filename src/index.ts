@@ -279,6 +279,4 @@ app.get("/health", (_req: Request, res: Response) => {
 
 app.listen(PORT, () => {
   console.log(`WOW Agent listening on port ${PORT}`);
-  pollGuesty();
-  setInterval(pollGuesty, 5 * 60 * 1000);
 });
