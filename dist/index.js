@@ -83,7 +83,9 @@ async function getReservationMessages(reservationId) {
         return [];
     const msgRes = await fetch(`https://open-api.guesty.com/v1/communication/conversations/${conversationId}`, { headers: { Authorization: `Bearer ${token}` } });
     const msgData = await msgRes.json();
-    return msgData.messages ?? [];
+    const msgs = msgData.thread ?? msgData.messages ?? [];
+    console.log("Messages found:", msgs.length);
+    return msgs;
 }
 function getStayStatus(checkIn, checkOut) {
     const now = new Date();
@@ -211,6 +213,7 @@ app.post("/webhook", async (req, res) => {
         if (!reservationId)
             return;
         console.log(`Webhook received for reservation ${reservationId}`);
+        console.log("DEBUG reservationId:", reservationId);
         const token = await getGuestyToken();
         const resData = await fetch(`https://open-api.guesty.com/v1/reservations/${reservationId}`, { headers: { Authorization: `Bearer ${token}` } });
         const reservation = await resData.json();
