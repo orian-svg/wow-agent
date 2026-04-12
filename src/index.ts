@@ -239,6 +239,7 @@ app.post("/webhook", async (req: Request, res: Response) => {
   try {
     const event = req.body;
     const reservationId = event.data?.reservationId ?? event.reservationId;
+    console.log("WEBHOOK PAYLOAD:", JSON.stringify(event, null, 2));
     if (!reservationId) return;
 
     console.log(`Webhook received for reservation ${reservationId}`);
