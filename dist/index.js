@@ -208,7 +208,7 @@ app.post("/webhook", async (req, res) => {
     res.sendStatus(200);
     try {
         const event = req.body;
-        const reservationId = event.data?.reservationId ?? event.reservationId;
+        const reservationId = event.data?.reservationId ?? event.reservationId ?? event.conversation?.meta?.reservations?.[0]?._id;
         console.log("WEBHOOK PAYLOAD:", JSON.stringify(event, null, 2));
         if (!reservationId)
             return;
