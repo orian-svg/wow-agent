@@ -38,6 +38,7 @@ app.post("/webhook", async (req, res) => {
         const event = req.body;
         console.log("Webhook received");
         console.log("CONV KEYS:", Object.keys(event.conversation ?? {}));
+        console.log("INTEGRATION:", JSON.stringify(event.conversation?.integration));
         const conversation = event.conversation;
         if (!conversation) {
             console.log("No conversation in payload");
