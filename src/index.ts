@@ -38,6 +38,7 @@ app.post("/webhook", async (req: Request, res: Response) => {
   try {
     const event = req.body;
 console.log("FULL EVENT:", JSON.stringify(event, null, 2));
+console.log("META:", JSON.stringify(event.conversation?.meta, null, 2));
     console.log("Webhook received");
     console.log("CONV KEYS:", Object.keys(event.conversation ?? {}));
     console.log("INTEGRATION:", JSON.stringify(event.conversation?.integration));
