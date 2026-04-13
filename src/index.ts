@@ -38,6 +38,7 @@ app.post("/webhook", async (req: Request, res: Response) => {
   try {
     const event = req.body;
     console.log("Webhook received");
+    console.log("CONV KEYS:", Object.keys(event.conversation ?? {}));
 
     const conversation = event.conversation;
     if (!conversation) {
