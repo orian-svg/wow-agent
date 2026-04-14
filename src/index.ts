@@ -31,19 +31,27 @@ async function getGuestyToken(): Promise<string> {
 async function loadListings() {
   try {
     const token = await getGuestyToken();
-    const res = await fetch("https://open-api.guesty.com/v1/listings?limit=50", {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = await res.json();
-    if (!data.results) {
-      console.log("Could not load listings:", JSON.stringify(data));
-      return;
-    }
-    for (const listing of data.results) {
-      listingMap[listing._id] = {
-        title: listing.title ?? "",
-        country: listing.address?.country ?? "",
-      };
+    let skip = 0;
+    const limit = 50;
+    let total = Infinity;
+
+    while (skip < total) {
+      const res = await fetch(`https://open-api.guesty.com/v1/listings?limit=${limit}&skip=${skip}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!data.results) {
+        console.log("Could not load listings:", JSON.stringify(data));
+        break;
+      }
+      total = data.count ?? 0;
+      for (const listing of data.results) {
+        listingMap[listing._id] = {
+          title: listing.title ?? "",
+          country: listing.address?.country ?? "",
+        };
+      }
+      skip += limit;
     }
     console.log(`Loaded ${Object.keys(listingMap).length} listings`);
   } catch (err) {
