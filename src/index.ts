@@ -30,11 +30,9 @@ async function getGuestyToken(): Promise<string> {
 async function loadListings() {
   try {
     const token = await getGuestyToken();
-    console.log("Token received:", token ? "YES" : "NO - EMPTY");
     let skip = 0;
     const limit = 50;
     let total = Infinity;
-
     while (skip < total) {
       const res = await fetch(`https://open-api.guesty.com/v1/listings?limit=${limit}&skip=${skip}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -59,6 +57,23 @@ async function loadListings() {
   }
 }
 
+async function getReservationListing(reservationId: string, token: string): Promise<{ title: string; country: string } | null> {
+  try {
+    const res = await fetch(`https://open-api.guesty.com/v1/reservations/${reservationId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json() as any;
+    console.log("Reservation listingId:", data.listingId);
+    if (data.listingId && listingMap[data.listingId]) {
+      return listingMap[data.listingId];
+    }
+    return null;
+  } catch (err) {
+    console.error("Failed to get reservation:", err);
+    return null;
+  }
+}
+
 async function sendSlackMessage(channel: string, text: string) {
   const token = process.env.SLACK_BOT_TOKEN;
   if (!token) return;
@@ -79,6 +94,10 @@ function getChannel(country: string): string {
   return "#wow-israel";
 }
 
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
 app.post("/webhook", async (req: Request, res: Response) => {
   res.sendStatus(200);
   try {
@@ -86,8 +105,6 @@ app.post("/webhook", async (req: Request, res: Response) => {
     console.log("Webhook received");
 
     const conversation = event.conversation;
-    console.log("Integration full:", JSON.stringify(conversation?.integration));
-
     if (!conversation) {
       console.log("No conversation in payload");
       return;
@@ -104,21 +121,19 @@ app.post("/webhook", async (req: Request, res: Response) => {
       return;
     }
 
-    console.log("Guest messages:", guestMessages.substring(0, 100));
+    const guestName = conversation.meta?.guestName ?? "Guest";
+    const reservation = conversation.meta?.reservations?.[0];
+    const checkIn = reservation?.checkIn ? formatDate(reservation.checkIn) : "לא ידוע";
+    const checkOut = reservation?.checkOut ? formatDate(reservation.checkOut) : "לא ידוע";
+    const reservationId = event.reservationId ?? reservation?._id ?? "";
 
-    const listingId = conversation.integration?.airbnb2?.id
-      ?? conversation.integration?.bookingCom?.id
-      ?? "";
-
-    console.log("Listing ID used:", listingId);
-
-    const listing = listingMap[listingId];
+    const token = await getGuestyToken();
+    const listing = reservationId ? await getReservationListing(reservationId, token) : null;
     const listingTitle = listing?.title ?? "Unknown";
     const country = listing?.country ?? "";
-    const guestName = conversation.meta?.guestName ?? "Guest";
     const channel = getChannel(country);
 
-    console.log(`Listing: ${listingTitle} | Country: ${country} | Channel: ${channel}`);
+    console.log(`Guest: ${guestName} | Listing: ${listingTitle} | Country: ${country} | Channel: ${channel}`);
 
     const prompt = `You are a WOW hospitality agent for O&O Group, a vacation rental company.
 Your philosophy is rooted in "Unreasonable Hospitality" by Will Guidara.
@@ -155,7 +170,7 @@ WHY: [max 2 lines — exact quote from the conversation]`;
     const what = analysis.match(/WHAT:(.*?)(?=WHY:|$)/s)?.[1]?.trim() ?? "";
     const why = analysis.match(/WHY:(.*?)$/s)?.[1]?.trim() ?? "";
 
-    const message = `*WOW Opportunity* 🌟\n\n*שם אורח:* ${guestName}\n*דירה:* ${listingTitle}\n\n*מה ההזדמנות:*\n${what}\n\n*למה זו הזדמנות:*\n${why}`.trim();
+    const message = `*WOW Opportunity* 🌟\n\n*שם אורח:* ${guestName}\n*דירה:* ${listingTitle}\n*תאריכים:* ${checkIn} — ${checkOut}\n\n*מה ההזדמנות:*\n${what}\n\n*למה זו הזדמנות:*\n${why}`.trim();
 
     await sendSlackMessage(channel, message);
     console.log(`Sent to ${channel}`);
