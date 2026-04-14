@@ -30,7 +30,7 @@ async function getGuestyToken(): Promise<string> {
 async function loadListings() {
   try {
     const token = await getGuestyToken();
-console.log("Token received:", token ? "YES" : "NO - EMPTY");
+    console.log("Token received:", token ? "YES" : "NO - EMPTY");
     let skip = 0;
     const limit = 50;
     let total = Infinity;
@@ -86,6 +86,8 @@ app.post("/webhook", async (req: Request, res: Response) => {
     console.log("Webhook received");
 
     const conversation = event.conversation;
+    console.log("Integration full:", JSON.stringify(conversation?.integration));
+
     if (!conversation) {
       console.log("No conversation in payload");
       return;
@@ -107,6 +109,8 @@ app.post("/webhook", async (req: Request, res: Response) => {
     const listingId = conversation.integration?.airbnb2?.id
       ?? conversation.integration?.bookingCom?.id
       ?? "";
+
+    console.log("Listing ID used:", listingId);
 
     const listing = listingMap[listingId];
     const listingTitle = listing?.title ?? "Unknown";

@@ -83,6 +83,7 @@ app.post("/webhook", async (req, res) => {
         const event = req.body;
         console.log("Webhook received");
         const conversation = event.conversation;
+        console.log("Integration full:", JSON.stringify(conversation?.integration));
         if (!conversation) {
             console.log("No conversation in payload");
             return;
@@ -100,6 +101,7 @@ app.post("/webhook", async (req, res) => {
         const listingId = conversation.integration?.airbnb2?.id
             ?? conversation.integration?.bookingCom?.id
             ?? "";
+        console.log("Listing ID used:", listingId);
         const listing = listingMap[listingId];
         const listingTitle = listing?.title ?? "Unknown";
         const country = listing?.country ?? "";
