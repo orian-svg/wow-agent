@@ -30,6 +30,7 @@ async function getGuestyToken(): Promise<string> {
 async function loadListings() {
   try {
     const token = await getGuestyToken();
+console.log("Token received:", token ? "YES" : "NO - EMPTY");
     let skip = 0;
     const limit = 50;
     let total = Infinity;
