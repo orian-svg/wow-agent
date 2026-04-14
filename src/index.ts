@@ -4,12 +4,52 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const app = express();
 const PORT = process.env.PORT ?? 3000;
-
 app.use(express.json());
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
+
+// Map of listingId -> { title, country }
+const listingMap: Record<string, { title: string; country: string }> = {};
+
+async function getGuestyToken(): Promise<string> {
+  const res = await fetch("https://open-api.guesty.com/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+      scope: "open-api",
+      client_id: process.env.GUESTY_CLIENT_ID ?? "",
+      client_secret: process.env.GUESTY_CLIENT_SECRET ?? "",
+    }),
+  });
+  const data = await res.json();
+  return data.access_token;
+}
+
+async function loadListings() {
+  try {
+    const token = await getGuestyToken();
+    const res = await fetch("https://open-api.guesty.com/v1/listings?limit=50", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!data.results) {
+      console.log("Could not load listings:", JSON.stringify(data));
+      return;
+    }
+    for (const listing of data.results) {
+      listingMap[listing._id] = {
+        title: listing.title ?? "",
+        country: listing.address?.country ?? "",
+      };
+    }
+    console.log(`Loaded ${Object.keys(listingMap).length} listings`);
+  } catch (err) {
+    console.error("Failed to load listings:", err);
+  }
+}
 
 async function sendSlackMessage(channel: string, text: string) {
   const token = process.env.SLACK_BOT_TOKEN;
@@ -24,9 +64,8 @@ async function sendSlackMessage(channel: string, text: string) {
   });
 }
 
-function getChannel(listing: string): string {
-  const lower = listing.toLowerCase();
-  if (lower.includes("athens") || lower.includes("greece")) {
+function getChannel(country: string): string {
+  if (country.toLowerCase() === "greece") {
     return "#wow-athens";
   }
   return "#wow-israel";
@@ -34,14 +73,9 @@ function getChannel(listing: string): string {
 
 app.post("/webhook", async (req: Request, res: Response) => {
   res.sendStatus(200);
-
   try {
     const event = req.body;
-console.log("FULL EVENT:", JSON.stringify(event, null, 2));
-console.log("META:", JSON.stringify(event.conversation?.meta, null, 2));
     console.log("Webhook received");
-    console.log("CONV KEYS:", Object.keys(event.conversation ?? {}));
-    console.log("INTEGRATION:", JSON.stringify(event.conversation?.integration));
 
     const conversation = event.conversation;
     if (!conversation) {
@@ -62,12 +96,19 @@ console.log("META:", JSON.stringify(event.conversation?.meta, null, 2));
 
     console.log("Guest messages:", guestMessages.substring(0, 100));
 
-    const listingTitle = conversation.integration?.platform ?? "";
+    const listingId = conversation.integration?.airbnb2?.id
+      ?? conversation.integration?.bookingCom?.id
+      ?? "";
+
+    const listing = listingMap[listingId];
+    const listingTitle = listing?.title ?? "Unknown";
+    const country = listing?.country ?? "";
     const guestName = conversation.meta?.guestName ?? "Guest";
-    const channel = getChannel(listingTitle);
+    const channel = getChannel(country);
+
+    console.log(`Listing: ${listingTitle} | Country: ${country} | Channel: ${channel}`);
 
     const prompt = `You are a WOW hospitality agent for O&O Group, a vacation rental company.
-
 Your philosophy is rooted in "Unreasonable Hospitality" by Will Guidara.
 A WOW moment comes ONLY from what the guest explicitly shared — never guess.
 If the guest hasn't revealed anything personal, answer OPPORTUNITY: no.
@@ -102,7 +143,7 @@ WHY: [max 2 lines — exact quote from the conversation]`;
     const what = analysis.match(/WHAT:(.*?)(?=WHY:|$)/s)?.[1]?.trim() ?? "";
     const why = analysis.match(/WHY:(.*?)$/s)?.[1]?.trim() ?? "";
 
-    const message = `*WOW Opportunity* 🌟\n\n*שם אורח:* ${guestName}\n\n*מה ההזדמנות:*\n${what}\n\n*למה זו הזדמנות:*\n${why}`.trim();
+    const message = `*WOW Opportunity* 🌟\n\n*שם אורח:* ${guestName}\n*דירה:* ${listingTitle}\n\n*מה ההזדמנות:*\n${what}\n\n*למה זו הזדמנות:*\n${why}`.trim();
 
     await sendSlackMessage(channel, message);
     console.log(`Sent to ${channel}`);
@@ -115,6 +156,7 @@ app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "ok" });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
+  await loadListings();
   console.log(`WOW Agent listening on port ${PORT}`);
 });
