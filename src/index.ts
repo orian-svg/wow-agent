@@ -10,7 +10,6 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-// Map of listingId -> { title, country }
 const listingMap: Record<string, { title: string; country: string }> = {};
 
 async function getGuestyToken(): Promise<string> {
@@ -24,7 +23,7 @@ async function getGuestyToken(): Promise<string> {
       client_secret: process.env.GUESTY_CLIENT_SECRET ?? "",
     }),
   });
-  const data = await res.json();
+  const data = await res.json() as any;
   return data.access_token;
 }
 
@@ -39,7 +38,7 @@ async function loadListings() {
       const res = await fetch(`https://open-api.guesty.com/v1/listings?limit=${limit}&skip=${skip}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
+      const data = await res.json() as any;
       if (!data.results) {
         console.log("Could not load listings:", JSON.stringify(data));
         break;
