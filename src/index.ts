@@ -33,6 +33,8 @@ async function loadListings() {
     let skip = 0;
     const limit = 50;
     let total = Infinity;
+    let loaded = 0;
+
     while (skip < total) {
       const res = await fetch(`https://open-api.guesty.com/v1/listings?limit=${limit}&skip=${skip}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -42,21 +44,29 @@ async function loadListings() {
         console.log("Could not load listings:", JSON.stringify(data));
         break;
       }
+      if (skip === 0) {
+        console.log("LISTING KEYS:", Object.keys(data.results[0] || {}));
+      }
       total = data.count ?? 0;
-if (skip === 0 && data.results.length > 0) {
-  console.log("LISTING KEYS:", Object.keys(data.results[0]));
-}
       for (const listing of data.results) {
         listingMap[listing._id] = {
           title: listing.title ?? "",
           country: listing.address?.country ?? "",
         };
+        loaded++;
       }
       skip += limit;
     }
-    console.log(`Loaded ${Object.keys(listingMap).length} listings`);
+    console.log(`Loaded ${loaded} listings`);
   } catch (err) {
     console.error("Failed to load listings:", err);
+  }
+}
+
+async function ensureListings() {
+  if (Object.keys(listingMap).length === 0) {
+    console.log("Listing map empty, reloading...");
+    await loadListings();
   }
 }
 
@@ -106,6 +116,8 @@ app.post("/webhook", async (req: Request, res: Response) => {
   try {
     const event = req.body;
     console.log("Webhook received");
+
+    await ensureListings();
 
     const conversation = event.conversation;
     if (!conversation) {
