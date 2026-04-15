@@ -43,6 +43,9 @@ async function loadListings() {
         break;
       }
       total = data.count ?? 0;
+if (skip === 0 && data.results.length > 0) {
+  console.log("LISTING KEYS:", Object.keys(data.results[0]));
+}
       for (const listing of data.results) {
         listingMap[listing._id] = {
           title: listing.title ?? "",
