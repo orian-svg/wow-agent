@@ -116,6 +116,7 @@ app.post("/webhook", async (req: Request, res: Response) => {
   try {
     const event = req.body;
     console.log("Webhook received");
+    console.log("PAYLOAD:", JSON.stringify(event, null, 2));
 
     await ensureListings();
 
