@@ -1,75 +1,48 @@
-import { z } from "zod";
-
-// ─── Guesty Webhook ──────────────────────────────────────────────────────────
-
-export interface GuestyGuest {
-  _id: string;
-  firstName: string;
-  lastName: string;
-  email?: string;
-  phone?: string;
+export interface GuestyListing {
+  id: string;
+  title: string;
+  country: string;
+  city: string;
 }
 
 export interface GuestyReservation {
-  _id: string;
-  checkIn: string;   // ISO date
-  checkOut: string;  // ISO date
+  id: string;
   listingId: string;
-  listingName?: string;
-  status: string;
-  nightsCount?: number;
+  checkIn: string;
+  checkOut: string;
+  source: string;
+  guestName: string;
 }
 
 export interface GuestyMessage {
-  _id: string;
   body: string;
-  createdAt: string;
-  type: "guest" | "host" | "system";
+  type: "fromGuest" | "fromHost" | "system";
+  createdAt?: string;
 }
 
-export interface GuestyWebhookPayload {
-  event: string;  // e.g. "reservation.message.created"
-  data: {
-    guest?: GuestyGuest;
-    reservation?: GuestyReservation;
-    message?: GuestyMessage;
-  };
+export interface WebhookContext {
+  reservationId: string | null;
+  conversationId: string | null;
+  guestName: string;
+  guestMessages: string;
+  checkIn: string | null;
+  checkOut: string | null;
+  source: string | null;
 }
 
-// ─── WOW Analysis ────────────────────────────────────────────────────────────
+export interface WowAnalysis {
+  isOpportunity: boolean;
+  what: string;
+  why: string;
+}
 
-export const WowOpportunitySchema = z.object({
-  isOpportunity: z.boolean().describe(
-    "True if this message contains a genuine WOW moment opportunity"
-  ),
-  opportunityType: z.enum([
-    "special_occasion",   // birthday, anniversary, honeymoon, graduation
-    "preference",         // dietary, accessibility, pillow type, etc.
-    "loyalty",            // returning guest, long-time fan
-    "service_recovery",   // complaint we can turn around
-    "proactive_help",     // need we can anticipate before they ask
-  ]).nullable().describe("The category of WOW opportunity, or null if none"),
-  urgency: z.enum(["high", "medium", "low"]).describe(
-    "high = act before check-in or within hours; medium = within the day; low = nice to do"
-  ),
-  headline: z.string().describe(
-    "One punchy sentence summarizing the opportunity for the ops team, e.g. 'Anniversary couple arriving tomorrow — surprise them'"
-  ),
-  suggestedActions: z.array(z.string()).describe(
-    "2–4 concrete actions staff can take right now"
-  ),
-  guestContext: z.string().describe(
-    "Brief summary of what the guest said / needs, in plain English for the team"
-  ),
-});
-
-export type WowOpportunity = z.infer<typeof WowOpportunitySchema>;
-
-// ─── Alert ───────────────────────────────────────────────────────────────────
-
-export interface AlertContext {
-  opportunity: WowOpportunity;
-  guest: GuestyGuest | undefined;
-  reservation: GuestyReservation | undefined;
-  originalMessage: string;
+export interface SlackAlertParams {
+  channel: string;
+  guestName: string;
+  listingTitle: string;
+  checkIn: string;
+  checkOut: string;
+  source: string;
+  what: string;
+  why: string;
 }
