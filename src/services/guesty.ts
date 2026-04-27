@@ -11,6 +11,8 @@ const RESERVATION_CACHE = new Cache<GuestyReservation>(10);
 
 const TOKEN_KEY = "current";
 
+let pendingTokenRequest: Promise<string> | null = null;
+
 async function fetchNewToken(): Promise<string> {
   const response = await fetch("https://open-api.guesty.com/oauth2/token", {
     method: "POST",
@@ -40,9 +42,23 @@ async function fetchNewToken(): Promise<string> {
 async function getToken(): Promise<string> {
   const cached = TOKEN_CACHE.get(TOKEN_KEY);
   if (cached) return cached;
-  const token = await fetchNewToken();
-  TOKEN_CACHE.set(TOKEN_KEY, token);
-  return token;
+
+  if (pendingTokenRequest) {
+    log.debug("Token request already in flight, waiting");
+    return pendingTokenRequest;
+  }
+
+  pendingTokenRequest = (async () => {
+    try {
+      const token = await fetchNewToken();
+      TOKEN_CACHE.set(TOKEN_KEY, token);
+      return token;
+    } finally {
+      pendingTokenRequest = null;
+    }
+  })();
+
+  return pendingTokenRequest;
 }
 
 async function guestyGet(path: string): Promise<unknown> {
