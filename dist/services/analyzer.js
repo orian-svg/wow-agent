@@ -21,6 +21,7 @@ STRICT RULES:
 3. If nothing personal was shared — answer OPPORTUNITY: no.
 4. The suggestion must be specific and genuinely personal.
 5. The "why" must contain an exact quote from the guest's messages.
+6. ALWAYS respond in English, even if the guest wrote in another language.
 
 Answer in this EXACT format, and nothing else:
 OPPORTUNITY: yes/no
