@@ -13,9 +13,9 @@ function channelForCountry(country: string): string {
 }
 
 function formatDate(iso: string | null): string {
-  if (!iso) return "לא ידוע";
+  if (!iso) return "Unknown";
   try {
-    return new Date(iso).toLocaleDateString("he-IL", {
+    return new Date(iso).toLocaleDateString("en-US", {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
@@ -25,16 +25,20 @@ function formatDate(iso: string | null): string {
   }
 }
 
-function formatSource(source: string): string {
+function formatSource(source: string | null): string {
+  if (!source) return "Unknown";
+  
   const map: Record<string, string> = {
     airbnb: "Airbnb",
     airbnb2: "Airbnb",
     "booking.com": "Booking.com",
     bookingcom: "Booking.com",
-    manual: "Website",
-    website: "Website",
+    expedia: "Expedia",
     vrbo: "VRBO",
+    manual: "Manual/Website",
+    website: "Manual/Website",
   };
+  
   const key = source.toLowerCase();
   return map[key] ?? source;
 }
@@ -59,7 +63,7 @@ export function buildAlertParams(input: {
     listingTitle: input.listingTitle,
     checkIn: formatDate(input.checkIn),
     checkOut: formatDate(input.checkOut),
-    source: formatSource(input.source ?? "unknown"),
+    source: formatSource(input.source),
     what: input.what,
     why: input.why,
   };
@@ -69,15 +73,16 @@ export async function sendAlert(params: SlackAlertParams): Promise<void> {
   const text = [
     "*WOW Opportunity* 🌟",
     "",
-    `*שם אורח:* ${params.guestName}`,
-    `*דירה:* ${params.listingTitle}`,
-    `*תאריכים:* ${params.checkIn} — ${params.checkOut}`,
-    `*ספק:* ${params.source}`,
+    `*Guest:* ${params.guestName}`,
+    `*Listing:* ${params.listingTitle}`,
+    `*Check-in:* ${params.checkIn}`,
+    `*Check-out:* ${params.checkOut}`,
+    `*Source:* ${params.source}`,
     "",
-    "*מה ההזדמנות:*",
+    "*What:*",
     params.what,
     "",
-    "*למה זו הזדמנות:*",
+    "*Why:*",
     params.why,
   ].join("\n");
 
