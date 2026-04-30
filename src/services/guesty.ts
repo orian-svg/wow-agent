@@ -5,7 +5,7 @@ import type { GuestyListing, GuestyReservation } from "../types.js";
 
 const log = createLogger("guesty");
 
-const TOKEN_CACHE = new Cache<string>(20);
+const TOKEN_CACHE = new Cache<string>(1380);
 const LISTING_CACHE = new Cache<GuestyListing>(60);
 const RESERVATION_CACHE = new Cache<GuestyReservation>(10);
 
