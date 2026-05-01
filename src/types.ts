@@ -32,7 +32,8 @@ export interface WebhookContext {
 
 export interface WowAnalysis {
   isOpportunity: boolean;
-  what: string;
+  material: string;
+  personal: string;
   why: string;
 }
 
@@ -43,6 +44,7 @@ export interface SlackAlertParams {
   checkIn: string;
   checkOut: string;
   source: string;
-  what: string;
+  material: string;
+  personal: string;
   why: string;
 }

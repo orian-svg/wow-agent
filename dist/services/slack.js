@@ -54,7 +54,8 @@ function buildAlertParams(input) {
         checkIn: formatDate(input.checkIn),
         checkOut: formatDate(input.checkOut),
         source: formatSource(input.source),
-        what: input.what,
+        material: input.material,
+        personal: input.personal,
         why: input.why,
     };
 }
@@ -68,11 +69,10 @@ async function sendAlert(params) {
         `*Check-out:* ${params.checkOut}`,
         `*Source:* ${params.source}`,
         "",
-        "*What:*",
-        params.what,
+        `*Material gesture:* ${params.material}`,
+        `*Personal touch:* ${params.personal}`,
         "",
-        "*Why:*",
-        params.why,
+        `*Why:* "${params.why}"`,
     ].join("\n");
     const response = await fetch("https://slack.com/api/chat.postMessage", {
         method: "POST",

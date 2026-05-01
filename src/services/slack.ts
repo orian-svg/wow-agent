@@ -27,7 +27,6 @@ function formatDate(iso: string | null): string {
 
 function formatSource(source: string | null): string {
   if (!source) return "Unknown";
-  
   const map: Record<string, string> = {
     airbnb: "Airbnb",
     airbnb2: "Airbnb",
@@ -38,7 +37,6 @@ function formatSource(source: string | null): string {
     manual: "Manual/Website",
     website: "Manual/Website",
   };
-  
   const key = source.toLowerCase();
   return map[key] ?? source;
 }
@@ -54,7 +52,8 @@ export function buildAlertParams(input: {
   checkIn: string | null;
   checkOut: string | null;
   source: string | null;
-  what: string;
+  material: string;
+  personal: string;
   why: string;
 }): SlackAlertParams {
   return {
@@ -64,7 +63,8 @@ export function buildAlertParams(input: {
     checkIn: formatDate(input.checkIn),
     checkOut: formatDate(input.checkOut),
     source: formatSource(input.source),
-    what: input.what,
+    material: input.material,
+    personal: input.personal,
     why: input.why,
   };
 }
@@ -79,11 +79,10 @@ export async function sendAlert(params: SlackAlertParams): Promise<void> {
     `*Check-out:* ${params.checkOut}`,
     `*Source:* ${params.source}`,
     "",
-    "*What:*",
-    params.what,
+    `*Material gesture:* ${params.material}`,
+    `*Personal touch:* ${params.personal}`,
     "",
-    "*Why:*",
-    params.why,
+    `*Why:* "${params.why}"`,
   ].join("\n");
 
   const response = await fetch("https://slack.com/api/chat.postMessage", {

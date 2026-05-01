@@ -87,7 +87,8 @@ async function webhookHandler(req, res) {
             checkIn,
             checkOut,
             source,
-            what: analysis.what,
+            material: analysis.material,
+            personal: analysis.personal,
             why: analysis.why,
         });
         await (0, slack_js_1.sendAlert)(alertParams);

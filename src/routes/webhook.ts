@@ -103,7 +103,8 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
       checkIn,
       checkOut,
       source,
-      what: analysis.what,
+      material: analysis.material,
+      personal: analysis.personal,
       why: analysis.why,
     });
 

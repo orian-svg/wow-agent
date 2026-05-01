@@ -19,51 +19,46 @@ STRICT RULES:
 1. Only identify an opportunity if the guest explicitly mentioned something personal.
 2. Do NOT guess based on name, nationality, or anything not stated.
 3. If nothing personal was shared — answer OPPORTUNITY: no.
-4. The suggestion must be specific and genuinely personal.
+4. Suggestions must be specific and genuinely personal — never generic or forced.
 5. The "why" must contain an exact quote from the guest's messages.
 6. ALWAYS respond in English, even if the guest wrote in another language.
+7. Never force a suggestion. If a gesture doesn't feel natural and meaningful, leave it as "Not this time".
 
-TYPES OF GESTURES — choose the one that fits best:
+TWO TYPES OF GESTURES — evaluate each independently:
 
-A. MATERIAL GESTURE
+MATERIAL GESTURE
 A physical gift, item, or service prepared in advance.
-Example: Guest mentions wedding anniversary → leave a bottle of wine and handwritten card.
-Example: Guest mentions traveling with a baby → prepare a baby chair and crib.
+Example: Guest mentions marathon → protein snack and running towel waiting in the apartment.
+Example: Guest mentions traveling with a baby → baby chair and crib prepared.
+Example: Guest mentions anniversary → bottle of wine and handwritten card.
+Only suggest if there is a clear, specific, natural opportunity. Otherwise: "Not this time".
 
-B. BEHAVIORAL GESTURE (often costs nothing but feels deeply personal)
-A follow-up message, a thoughtful question, or genuine attention at the right moment.
-Example: Guest mentions wife has a medical procedure tomorrow → schedule a message tomorrow morning asking how she's feeling and offering help.
-Example: Guest mentions running a marathon during stay → message after the race day to ask how it went.
-Example: Guest mentions a stressful work presentation → ask how it went a day after.
-Example: Guest mentions visiting a sick family member → check in mid-stay with a caring message.
-
-C. COMBINED GESTURE
-Material gift PLUS a behavioral follow-up.
-Example: Guest mentions birthday during stay → leave a small cake on the day AND send a personal birthday wish in the morning.
-
-GUIDELINES:
-- Prefer behavioral gestures when the guest shares something emotional, personal, or time-sensitive.
-- Prefer material gestures when the guest shares celebrations, special occasions, or specific needs.
-- Behavioral gestures often have more emotional impact than material ones.
-- Don't default to material gifts — they are not always the right answer.
+PERSONAL TOUCH
+A behavioral follow-up — a message, a question, genuine attention at the right moment.
+Example: Guest mentions marathon on May 10th → send message on May 11th asking how the race went and what place they finished.
+Example: Guest mentions wife has a medical procedure tomorrow → message next morning asking how she's feeling.
+Example: Guest mentions stressful work presentation → ask how it went a day after.
+Only suggest if there is a clear moment to follow up naturally. Otherwise: "Not this time".
 
 Answer in this EXACT format, and nothing else:
 OPPORTUNITY: yes/no
-WHAT: [max 2 lines describing the suggested gesture, including timing if behavioral]
+MATERIAL: [specific material gesture, or "Not this time"]
+PERSONAL: [specific personal touch with exact timing, or "Not this time"]
 WHY: [max 2 lines — exact quote from the conversation]`;
 async function analyze(guestName, guestMessages) {
     const userContent = `Guest: ${guestName}\n\nGuest messages:\n${guestMessages}`;
     const response = await client.messages.create({
         model: "claude-opus-4-5",
-        max_tokens: 400,
+        max_tokens: 500,
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: userContent }],
     });
     const first = response.content[0];
     const text = first && first.type === "text" ? first.text : "";
-    log.debug("Raw analysis", { text: text.substring(0, 200) });
+    log.debug("Raw analysis", { text: text.substring(0, 300) });
     const isOpportunity = /OPPORTUNITY:\s*yes/i.test(text);
-    const what = text.match(/WHAT:([\s\S]*?)(?=WHY:|$)/i)?.[1]?.trim() ?? "";
+    const material = text.match(/MATERIAL:([\s\S]*?)(?=PERSONAL:|WHY:|$)/i)?.[1]?.trim() ?? "Not this time";
+    const personal = text.match(/PERSONAL:([\s\S]*?)(?=WHY:|$)/i)?.[1]?.trim() ?? "Not this time";
     const why = text.match(/WHY:([\s\S]*?)$/i)?.[1]?.trim() ?? "";
-    return { isOpportunity, what, why };
+    return { isOpportunity, material, personal, why };
 }
