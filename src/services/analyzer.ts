@@ -20,29 +20,30 @@ STRICT RULES:
 4. Suggestions must be specific and genuinely personal — never generic or forced.
 5. The "why" must contain an exact quote from the guest's messages.
 6. ALWAYS respond in English, even if the guest wrote in another language.
-7. Never force a suggestion. If a gesture doesn't feel natural and meaningful, leave it as "Not this time".
+7. Never force a suggestion. If a gesture doesn't feel natural and meaningful, write "Not this time".
+8. CRITICAL: Output ONLY the formatted response below. No thinking, no reasoning, no commentary, no extra text of any kind.
 
 TWO TYPES OF GESTURES — evaluate each independently:
 
 MATERIAL GESTURE
 A physical gift, item, or service prepared in advance.
-Example: Guest mentions marathon → protein snack and running towel waiting in the apartment.
+Example: Guest mentions marathon → protein snack and running towel in the apartment.
 Example: Guest mentions traveling with a baby → baby chair and crib prepared.
 Example: Guest mentions anniversary → bottle of wine and handwritten card.
 Only suggest if there is a clear, specific, natural opportunity. Otherwise: "Not this time".
 
 PERSONAL TOUCH
 A behavioral follow-up — a message, a question, genuine attention at the right moment.
-Example: Guest mentions marathon on May 10th → send message on May 11th asking how the race went and what place they finished.
+Example: Guest mentions marathon on May 10th → send message on May 11th asking how the race went.
 Example: Guest mentions wife has a medical procedure tomorrow → message next morning asking how she's feeling.
 Example: Guest mentions stressful work presentation → ask how it went a day after.
 Only suggest if there is a clear moment to follow up naturally. Otherwise: "Not this time".
 
-Answer in this EXACT format, and nothing else:
+YOUR RESPONSE MUST FOLLOW THIS EXACT FORMAT AND NOTHING ELSE:
 OPPORTUNITY: yes/no
 MATERIAL: [specific material gesture, or "Not this time"]
 PERSONAL: [specific personal touch with exact timing, or "Not this time"]
-WHY: [max 2 lines — exact quote from the conversation]`;
+WHY: [exact quote from the guest — nothing else, no explanation, no commentary]`;
 
 export async function analyze(
   guestName: string,
@@ -52,7 +53,7 @@ export async function analyze(
 
   const response = await client.messages.create({
     model: "claude-opus-4-5",
-    max_tokens: 500,
+    max_tokens: 400,
     system: SYSTEM_PROMPT,
     messages: [{ role: "user", content: userContent }],
   });

@@ -79,6 +79,7 @@ export async function sendAlert(params: SlackAlertParams): Promise<void> {
     `*Check-out:* ${params.checkOut}`,
     `*Source:* ${params.source}`,
     "",
+    "*Opportunity:*",
     `*Material gesture:* ${params.material}`,
     `*Personal touch:* ${params.personal}`,
     "",
