@@ -108,6 +108,11 @@ async function getReservation(reservationId) {
     }
     try {
         const data = (await guestyGet(`/v1/reservations/${reservationId}`));
+        const firstName = data.guest?.firstName ?? "";
+        const lastName = data.guest?.lastName ?? "";
+        const fullName = data.guest?.fullName ?? "";
+        const combinedName = `${firstName} ${lastName}`.trim();
+        const guestName = fullName || combinedName || "Guest";
         const reservation = {
             id: data._id,
             listingId: data.listingId ?? "",
@@ -116,9 +121,7 @@ async function getReservation(reservationId) {
             source: data.source ?? "unknown",
             status: data.status ?? "unknown",
             isReturningGuest: data.isReturningGuest ?? false,
-            guestName: data.guest?.fullName ??
-                `${data.guest?.firstName ?? ""} ${data.guest?.lastName ?? ""}`.trim() ||
-                "Guest",
+            guestName,
         };
         RESERVATION_CACHE.set(reservationId, reservation);
         log.info(`Reservation ${reservationId} loaded (status: ${reservation.status}, returning: ${reservation.isReturningGuest})`);

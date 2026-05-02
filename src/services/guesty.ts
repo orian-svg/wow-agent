@@ -140,6 +140,12 @@ export async function getReservation(
       guest?: { fullName?: string; firstName?: string; lastName?: string };
     };
 
+    const firstName = data.guest?.firstName ?? "";
+    const lastName = data.guest?.lastName ?? "";
+    const fullName = data.guest?.fullName ?? "";
+    const combinedName = `${firstName} ${lastName}`.trim();
+    const guestName = fullName || combinedName || "Guest";
+
     const reservation: GuestyReservation = {
       id: data._id,
       listingId: data.listingId ?? "",
@@ -148,10 +154,7 @@ export async function getReservation(
       source: data.source ?? "unknown",
       status: data.status ?? "unknown",
       isReturningGuest: data.isReturningGuest ?? false,
-      guestName:
-        data.guest?.fullName ??
-        `${data.guest?.firstName ?? ""} ${data.guest?.lastName ?? ""}`.trim() ||
-        "Guest",
+      guestName,
     };
 
     RESERVATION_CACHE.set(reservationId, reservation);
