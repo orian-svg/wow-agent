@@ -6,6 +6,19 @@ const guesty_js_1 = require("../services/guesty.js");
 const slack_js_1 = require("../services/slack.js");
 const analyzer_js_1 = require("../services/analyzer.js");
 const log = (0, logger_js_1.createLogger)("webhook");
+function formatStatus(status, isReturningGuest) {
+    if (isReturningGuest)
+        return "Returning Guest";
+    const map = {
+        inquiry: "Inquiry",
+        reserved: "Inquiry",
+        confirmed: "Confirmed",
+        checked_in: "Checked In",
+        checked_out: "Checked Out",
+        cancelled: "Cancelled",
+    };
+    return map[status.toLowerCase()] ?? status;
+}
 function extractContext(event) {
     const conversation = event?.conversation ?? {};
     const thread = conversation.thread ?? [];
@@ -50,12 +63,14 @@ async function webhookHandler(req, res) {
         let checkOut = ctx.checkOut;
         let source = ctx.source;
         let guestName = ctx.guestName;
+        let status = "Unknown";
         if (ctx.reservationId) {
             const reservation = await (0, guesty_js_1.getReservation)(ctx.reservationId);
             if (reservation) {
                 checkIn = checkIn ?? reservation.checkIn;
                 checkOut = checkOut ?? reservation.checkOut;
                 source = source ?? reservation.source;
+                status = formatStatus(reservation.status, reservation.isReturningGuest);
                 if (guestName === "Guest" && reservation.guestName) {
                     guestName = reservation.guestName;
                 }
@@ -73,6 +88,7 @@ async function webhookHandler(req, res) {
             listingTitle,
             country,
             source,
+            status,
         });
         const analysis = await (0, analyzer_js_1.analyze)(guestName, ctx.guestMessages);
         log.info("Analysis result", { isOpportunity: analysis.isOpportunity });
@@ -87,6 +103,7 @@ async function webhookHandler(req, res) {
             checkIn,
             checkOut,
             source,
+            status,
             material: analysis.material,
             personal: analysis.personal,
             why: analysis.why,

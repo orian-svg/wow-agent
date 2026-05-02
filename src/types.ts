@@ -12,6 +12,8 @@ export interface GuestyReservation {
   checkOut: string;
   source: string;
   guestName: string;
+  status: string;
+  isReturningGuest: boolean;
 }
 
 export interface GuestyMessage {
@@ -44,6 +46,7 @@ export interface SlackAlertParams {
   checkIn: string;
   checkOut: string;
   source: string;
+  status: string;
   material: string;
   personal: string;
   why: string;

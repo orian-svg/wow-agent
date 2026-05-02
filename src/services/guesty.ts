@@ -135,6 +135,8 @@ export async function getReservation(
       checkIn?: string;
       checkOut?: string;
       source?: string;
+      status?: string;
+      isReturningGuest?: boolean;
       guest?: { fullName?: string; firstName?: string; lastName?: string };
     };
 
@@ -144,14 +146,16 @@ export async function getReservation(
       checkIn: data.checkIn ?? "",
       checkOut: data.checkOut ?? "",
       source: data.source ?? "unknown",
+      status: data.status ?? "unknown",
+      isReturningGuest: data.isReturningGuest ?? false,
       guestName:
         data.guest?.fullName ??
-        `${data.guest?.firstName ?? ""} ${data.guest?.lastName ?? ""}`.trim() ??
+        `${data.guest?.firstName ?? ""} ${data.guest?.lastName ?? ""}`.trim() ||
         "Guest",
     };
 
     RESERVATION_CACHE.set(reservationId, reservation);
-    log.info(`Reservation ${reservationId} loaded`);
+    log.info(`Reservation ${reservationId} loaded (status: ${reservation.status}, returning: ${reservation.isReturningGuest})`);
     return reservation;
   } catch (err) {
     log.error(`Failed to load reservation ${reservationId}`, { error: String(err) });

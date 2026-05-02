@@ -52,6 +52,7 @@ export function buildAlertParams(input: {
   checkIn: string | null;
   checkOut: string | null;
   source: string | null;
+  status: string;
   material: string;
   personal: string;
   why: string;
@@ -63,6 +64,7 @@ export function buildAlertParams(input: {
     checkIn: formatDate(input.checkIn),
     checkOut: formatDate(input.checkOut),
     source: formatSource(input.source),
+    status: input.status,
     material: input.material,
     personal: input.personal,
     why: input.why,
@@ -78,6 +80,7 @@ export async function sendAlert(params: SlackAlertParams): Promise<void> {
     `*Check-in:* ${params.checkIn}`,
     `*Check-out:* ${params.checkOut}`,
     `*Source:* ${params.source}`,
+    `*Status:* ${params.status}`,
     "",
     "*Opportunity:*",
     `*Material gesture:* ${params.material}`,

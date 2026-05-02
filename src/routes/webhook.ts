@@ -7,6 +7,19 @@ import type { GuestyMessage, WebhookContext } from "../types.js";
 
 const log = createLogger("webhook");
 
+function formatStatus(status: string, isReturningGuest: boolean): string {
+  if (isReturningGuest) return "Returning Guest";
+  const map: Record<string, string> = {
+    inquiry: "Inquiry",
+    reserved: "Inquiry",
+    confirmed: "Confirmed",
+    checked_in: "Checked In",
+    checked_out: "Checked Out",
+    cancelled: "Cancelled",
+  };
+  return map[status.toLowerCase()] ?? status;
+}
+
 function extractContext(event: any): WebhookContext {
   const conversation = event?.conversation ?? {};
   const thread: GuestyMessage[] = conversation.thread ?? [];
@@ -61,6 +74,7 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
     let checkOut = ctx.checkOut;
     let source = ctx.source;
     let guestName = ctx.guestName;
+    let status = "Unknown";
 
     if (ctx.reservationId) {
       const reservation = await getReservation(ctx.reservationId);
@@ -68,6 +82,7 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
         checkIn = checkIn ?? reservation.checkIn;
         checkOut = checkOut ?? reservation.checkOut;
         source = source ?? reservation.source;
+        status = formatStatus(reservation.status, reservation.isReturningGuest);
         if (guestName === "Guest" && reservation.guestName) {
           guestName = reservation.guestName;
         }
@@ -86,6 +101,7 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
       listingTitle,
       country,
       source,
+      status,
     });
 
     const analysis = await analyze(guestName, ctx.guestMessages);
@@ -103,6 +119,7 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
       checkIn,
       checkOut,
       source,
+      status,
       material: analysis.material,
       personal: analysis.personal,
       why: analysis.why,
