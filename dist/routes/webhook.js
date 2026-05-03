@@ -50,7 +50,7 @@ async function webhookHandler(req, res) {
     try {
         const event = req.body;
         log.info("Webhook received");
-        log.debug("Full payload", event);
+        log.debug("Full payload", JSON.stringify(event).substring(0, 500));
         const ctx = extractContext(event);
         log.debug("Extracted context", ctx);
         if (!ctx.guestMessages) {
