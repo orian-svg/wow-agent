@@ -165,3 +165,23 @@ export async function getReservation(
     return null;
   }
 }
+
+export async function getConversation(conversationId: string): Promise<string> {
+  try {
+    const data = (await guestyGet(`/v1/communication/conversations/${conversationId}`)) as {
+      thread?: Array<{ type: string; body?: string }>;
+    };
+
+    const messages = (data.thread ?? [])
+      .filter((m) => m.type === "fromGuest")
+      .map((m) => m.body ?? "")
+      .filter((b) => b.trim().length > 0)
+      .join("\n");
+
+    log.info(`Conversation ${conversationId} loaded (${messages.length} chars)`);
+    return messages;
+  } catch (err) {
+    log.error(`Failed to load conversation ${conversationId}`, { error: String(err) });
+    return "";
+  }
+}

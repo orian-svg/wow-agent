@@ -19,96 +19,160 @@ function formatStatus(status, isReturningGuest) {
     };
     return map[status.toLowerCase()] ?? status;
 }
-function extractContext(event) {
-    const conversation = event?.conversation ?? {};
-    const thread = conversation.thread ?? [];
-    const meta = conversation.meta ?? {};
-    const firstReservation = meta.reservations?.[0];
-    const guestMessages = thread
+function extractMessagesFromThread(thread) {
+    return thread
         .filter((m) => m.type === "fromGuest")
         .map((m) => m.body)
         .filter((b) => typeof b === "string" && b.trim().length > 0)
         .join("\n");
-    const reservationId = event?.reservationId ??
+}
+function extractReservationId(event) {
+    const conversation = event?.conversation ?? {};
+    const meta = conversation.meta ?? {};
+    const firstReservation = meta.reservations?.[0];
+    return (event?.reservationId ??
         event?.reservation?._id ??
         firstReservation?._id ??
         conversation.reservationId ??
-        null;
-    const conversationId = conversation._id ?? event?.conversationId ?? null;
-    return {
-        reservationId,
-        conversationId,
-        guestName: meta.guestName ?? firstReservation?.guest?.fullName ?? "Guest",
-        guestMessages,
-        checkIn: firstReservation?.checkIn ?? null,
-        checkOut: firstReservation?.checkOut ?? null,
-        source: firstReservation?.source ?? null,
-    };
+        null);
+}
+function extractConversationId(event) {
+    const conversation = event?.conversation ?? {};
+    return conversation._id ?? event?.conversationId ?? null;
+}
+function wasJustConfirmed(event) {
+    const newStatus = event?.reservation?.status ?? event?.data?.reservation?.status ?? "";
+    const oldStatus = event?.reservationBefore?.status ??
+        event?.data?.reservationBefore?.status ??
+        "";
+    const confirmedStatuses = ["confirmed", "inquiry", "reserved"];
+    const wasInquiry = ["inquiry", "reserved", "pending"].includes(oldStatus.toLowerCase());
+    const isNowConfirmed = newStatus.toLowerCase() === "confirmed";
+    return wasInquiry && isNowConfirmed;
 }
 async function webhookHandler(req, res) {
     res.sendStatus(200);
     try {
         const event = req.body;
-        log.info("Webhook received");
+        const eventType = event?.event ?? "";
+        log.info("Webhook received", { eventType });
         log.debug("Full payload", JSON.stringify(event).substring(0, 500));
-        const ctx = extractContext(event);
-        log.debug("Extracted context", ctx);
-        if (!ctx.guestMessages) {
-            log.info("No guest messages found, skipping");
-            return;
-        }
-        let listingTitle = "Unknown";
-        let country = "";
-        let checkIn = ctx.checkIn;
-        let checkOut = ctx.checkOut;
-        let source = ctx.source;
-        let guestName = ctx.guestName;
-        let status = "Unknown";
-        if (ctx.reservationId) {
-            const reservation = await (0, guesty_js_1.getReservation)(ctx.reservationId);
-            if (reservation) {
-                checkIn = checkIn ?? reservation.checkIn;
-                checkOut = checkOut ?? reservation.checkOut;
-                source = source ?? reservation.source;
-                status = formatStatus(reservation.status, reservation.isReturningGuest);
-                if (guestName === "Guest" && reservation.guestName) {
-                    guestName = reservation.guestName;
-                }
-                if (reservation.listingId) {
-                    const listing = await (0, guesty_js_1.getListing)(reservation.listingId);
-                    if (listing) {
-                        listingTitle = listing.title;
-                        country = listing.country;
-                    }
-                }
+        const reservationId = extractReservationId(event);
+        const conversationId = extractConversationId(event);
+        // --- מסלול 1: reservation.updated ---
+        // מנתח רק אם ההזמנה עברה מ-inquiry ל-confirmed
+        if (eventType === "reservation.updated") {
+            if (!wasJustConfirmed(event)) {
+                log.info("reservation.updated but not a confirmation transition, skipping");
+                return;
             }
-        }
-        log.info("Context resolved", {
-            guestName,
-            listingTitle,
-            country,
-            source,
-            status,
-        });
-        const analysis = await (0, analyzer_js_1.analyze)(guestName, ctx.guestMessages);
-        log.info("Analysis result", { isOpportunity: analysis.isOpportunity });
-        if (!analysis.isOpportunity) {
-            log.info("No opportunity identified");
+            log.info("Reservation just confirmed — analyzing full conversation");
+            if (!reservationId) {
+                log.warn("No reservationId in reservation.updated event, skipping");
+                return;
+            }
+            const reservation = await (0, guesty_js_1.getReservation)(reservationId);
+            if (!reservation)
+                return;
+            // נסה לקחת שיחה מה-thread של ה-event, אחרת קרא מגסטי
+            const thread = event?.conversation?.thread ?? [];
+            let guestMessages = extractMessagesFromThread(thread);
+            if (!guestMessages && conversationId) {
+                guestMessages = await (0, guesty_js_1.getConversation)(conversationId);
+            }
+            if (!guestMessages) {
+                log.info("No guest messages found in confirmed reservation, skipping");
+                return;
+            }
+            const listing = reservation.listingId
+                ? await (0, guesty_js_1.getListing)(reservation.listingId)
+                : null;
+            const status = formatStatus(reservation.status, reservation.isReturningGuest);
+            log.info("Context resolved", {
+                guestName: reservation.guestName,
+                listingTitle: listing?.title ?? "Unknown",
+                country: listing?.country ?? "",
+                status,
+            });
+            const analysis = await (0, analyzer_js_1.analyze)(reservation.guestName, guestMessages);
+            log.info("Analysis result", { isOpportunity: analysis.isOpportunity });
+            if (!analysis.isOpportunity) {
+                log.info("No opportunity identified");
+                return;
+            }
+            const alertParams = (0, slack_js_1.buildAlertParams)({
+                country: listing?.country ?? "",
+                guestName: reservation.guestName,
+                listingTitle: listing?.title ?? "Unknown",
+                checkIn: reservation.checkIn,
+                checkOut: reservation.checkOut,
+                source: reservation.source,
+                status,
+                material: analysis.material,
+                personal: analysis.personal,
+                why: analysis.why,
+            });
+            await (0, slack_js_1.sendAlert)(alertParams);
             return;
         }
-        const alertParams = (0, slack_js_1.buildAlertParams)({
-            country,
-            guestName,
-            listingTitle,
-            checkIn,
-            checkOut,
-            source,
-            status,
-            material: analysis.material,
-            personal: analysis.personal,
-            why: analysis.why,
-        });
-        await (0, slack_js_1.sendAlert)(alertParams);
+        // --- מסלול 2: reservation.messageReceived ---
+        // מנתח רק אם אורח חוזר
+        if (eventType === "reservation.messageReceived") {
+            const conversation = event?.conversation ?? {};
+            const thread = conversation.thread ?? [];
+            const meta = conversation.meta ?? {};
+            const firstReservation = meta.reservations?.[0];
+            const guestMessages = extractMessagesFromThread(thread);
+            if (!guestMessages) {
+                log.info("No guest messages found, skipping");
+                return;
+            }
+            // אם אין reservationId — לא יכולים לבדוק אם אורח חוזר, מדלגים
+            if (!reservationId) {
+                log.info("No reservationId in messageReceived event, skipping");
+                return;
+            }
+            const reservation = await (0, guesty_js_1.getReservation)(reservationId);
+            if (!reservation)
+                return;
+            // מנתח הודעות רק אם אורח חוזר
+            if (!reservation.isReturningGuest) {
+                log.info("Not a returning guest, skipping message analysis");
+                return;
+            }
+            log.info("Returning guest — analyzing message");
+            const listing = reservation.listingId
+                ? await (0, guesty_js_1.getListing)(reservation.listingId)
+                : null;
+            const status = formatStatus(reservation.status, reservation.isReturningGuest);
+            log.info("Context resolved", {
+                guestName: reservation.guestName,
+                listingTitle: listing?.title ?? "Unknown",
+                country: listing?.country ?? "",
+                status,
+            });
+            const analysis = await (0, analyzer_js_1.analyze)(reservation.guestName, guestMessages);
+            log.info("Analysis result", { isOpportunity: analysis.isOpportunity });
+            if (!analysis.isOpportunity) {
+                log.info("No opportunity identified");
+                return;
+            }
+            const alertParams = (0, slack_js_1.buildAlertParams)({
+                country: listing?.country ?? "",
+                guestName: reservation.guestName,
+                listingTitle: listing?.title ?? "Unknown",
+                checkIn: reservation.checkIn,
+                checkOut: reservation.checkOut,
+                source: reservation.source,
+                status,
+                material: analysis.material,
+                personal: analysis.personal,
+                why: analysis.why,
+            });
+            await (0, slack_js_1.sendAlert)(alertParams);
+            return;
+        }
+        log.info("Unknown event type, skipping", { eventType });
     }
     catch (err) {
         log.error("Webhook handler error", { error: String(err) });

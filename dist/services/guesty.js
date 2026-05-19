@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getListing = getListing;
 exports.getReservation = getReservation;
+exports.getConversation = getConversation;
 const config_js_1 = require("../config.js");
 const cache_js_1 = require("../lib/cache.js");
 const logger_js_1 = require("../lib/logger.js");
@@ -130,5 +131,21 @@ async function getReservation(reservationId) {
     catch (err) {
         log.error(`Failed to load reservation ${reservationId}`, { error: String(err) });
         return null;
+    }
+}
+async function getConversation(conversationId) {
+    try {
+        const data = (await guestyGet(`/v1/communication/conversations/${conversationId}`));
+        const messages = (data.thread ?? [])
+            .filter((m) => m.type === "fromGuest")
+            .map((m) => m.body ?? "")
+            .filter((b) => b.trim().length > 0)
+            .join("\n");
+        log.info(`Conversation ${conversationId} loaded (${messages.length} chars)`);
+        return messages;
+    }
+    catch (err) {
+        log.error(`Failed to load conversation ${conversationId}`, { error: String(err) });
+        return "";
     }
 }
