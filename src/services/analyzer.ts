@@ -28,6 +28,7 @@ STRICT RULES:
 8. The WHY must be a short English translation/summary of what the guest said — never copy the original text in another language.
 9. Never force a suggestion. If a gesture doesn't feel natural and meaningful, write "Not this time".
 10. CRITICAL: Output ONLY the formatted response below. No thinking, no reasoning, no commentary, no extra text of any kind. Start directly with OPPORTUNITY:
+11. IMPORTANT: If past opportunities are provided, do NOT suggest anything based on the same personal detail again. Only identify NEW information not yet acted upon.
 
 EXAMPLES OF WHAT IS NOT WOW:
 - Guest asks for a baby crib → providing the crib is logistics. NOT WOW.
@@ -61,8 +62,14 @@ WHY: [one sentence in English summarizing what the guest shared that creates thi
 export async function analyze(
   guestName: string,
   guestMessages: string,
+  pastOpportunities: string[] = [],
 ): Promise<WowAnalysis> {
-  const userContent = `Guest: ${guestName}\n\nGuest messages:\n${guestMessages}`;
+  let userContent = `Guest: ${guestName}\n\nGuest messages:\n${guestMessages}`;
+
+  if (pastOpportunities.length > 0) {
+    userContent += `\n\nPAST OPPORTUNITIES ALREADY SENT FOR THIS RESERVATION (do NOT repeat these):\n`;
+    userContent += pastOpportunities.map((o, i) => `${i + 1}. ${o}`).join("\n");
+  }
 
   const response = await client.messages.create({
     model: "claude-opus-4-5",

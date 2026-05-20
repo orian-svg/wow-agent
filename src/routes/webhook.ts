@@ -3,6 +3,7 @@ import { createLogger } from "../lib/logger.js";
 import { getListing, getReservation, getConversation } from "../services/guesty.js";
 import { buildAlertParams, sendAlert } from "../services/slack.js";
 import { analyze } from "../services/analyzer.js";
+import { getPastOpportunities, recordOpportunity } from "../lib/memory.js";
 import type { GuestyMessage, WebhookContext } from "../types.js";
 
 const log = createLogger("webhook");
@@ -54,11 +55,53 @@ function wasJustConfirmed(event: any): boolean {
     event?.data?.reservationBefore?.status ??
     "";
 
-  const confirmedStatuses = ["confirmed", "inquiry", "reserved"];
   const wasInquiry = ["inquiry", "reserved", "pending"].includes(oldStatus.toLowerCase());
   const isNowConfirmed = newStatus.toLowerCase() === "confirmed";
 
   return wasInquiry && isNowConfirmed;
+}
+
+async function handleAnalysis({
+  reservationId,
+  guestMessages,
+  reservation,
+  listing,
+  status,
+}: {
+  reservationId: string;
+  guestMessages: string;
+  reservation: { guestName: string; checkIn: string; checkOut: string; source: string; status: string };
+  listing: { country: string; title: string } | null;
+  status: string;
+}): Promise<void> {
+  // שלב 1: בדוק מה כבר נשלח עבור ההזמנה הזו
+  const pastOpportunities = getPastOpportunities(reservationId);
+
+  const analysis = await analyze(reservation.guestName, guestMessages, pastOpportunities);
+  log.info("Analysis result", { isOpportunity: analysis.isOpportunity });
+
+  if (!analysis.isOpportunity) {
+    log.info("No new opportunity identified");
+    return;
+  }
+
+  const alertParams = buildAlertParams({
+    country: listing?.country ?? "",
+    guestName: reservation.guestName,
+    listingTitle: listing?.title ?? "Unknown",
+    checkIn: reservation.checkIn,
+    checkOut: reservation.checkOut,
+    source: reservation.source,
+    status,
+    material: analysis.material,
+    personal: analysis.personal,
+    why: analysis.why,
+  });
+
+  await sendAlert(alertParams);
+
+  // שמור שנשלחה המלצה כדי לא לחזור עליה
+  recordOpportunity(reservationId, analysis.why);
 }
 
 export async function webhookHandler(req: Request, res: Response): Promise<void> {
@@ -74,8 +117,13 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
     const reservationId = extractReservationId(event);
     const conversationId = extractConversationId(event);
 
+    // שלב 3: אם אין reservationId — לא עושים כלום
+    if (!reservationId) {
+      log.info("No reservationId found, skipping");
+      return;
+    }
+
     // --- מסלול 1: reservation.updated ---
-    // מנתח רק אם ההזמנה עברה מ-inquiry ל-confirmed
     if (eventType === "reservation.updated") {
       if (!wasJustConfirmed(event)) {
         log.info("reservation.updated but not a confirmation transition, skipping");
@@ -84,15 +132,9 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
 
       log.info("Reservation just confirmed — analyzing full conversation");
 
-      if (!reservationId) {
-        log.warn("No reservationId in reservation.updated event, skipping");
-        return;
-      }
-
       const reservation = await getReservation(reservationId);
       if (!reservation) return;
 
-      // נסה לקחת שיחה מה-thread של ה-event, אחרת קרא מגסטי
       const thread: GuestyMessage[] = event?.conversation?.thread ?? [];
       let guestMessages = extractMessagesFromThread(thread);
 
@@ -118,38 +160,15 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
         status,
       });
 
-      const analysis = await analyze(reservation.guestName, guestMessages);
-      log.info("Analysis result", { isOpportunity: analysis.isOpportunity });
-
-      if (!analysis.isOpportunity) {
-        log.info("No opportunity identified");
-        return;
-      }
-
-      const alertParams = buildAlertParams({
-        country: listing?.country ?? "",
-        guestName: reservation.guestName,
-        listingTitle: listing?.title ?? "Unknown",
-        checkIn: reservation.checkIn,
-        checkOut: reservation.checkOut,
-        source: reservation.source,
-        status,
-        material: analysis.material,
-        personal: analysis.personal,
-        why: analysis.why,
-      });
-
-      await sendAlert(alertParams);
+      await handleAnalysis({ reservationId, guestMessages, reservation, listing, status });
       return;
     }
 
     // --- מסלול 2: reservation.messageReceived ---
-    // מנתח רק אם אורח חוזר
+    // שלב 2: מנתח כל הודעה (לא רק אורחים חוזרים)
     if (eventType === "reservation.messageReceived") {
       const conversation = event?.conversation ?? {};
       const thread: GuestyMessage[] = conversation.thread ?? [];
-      const meta = conversation.meta ?? {};
-      const firstReservation = meta.reservations?.[0];
 
       const guestMessages = extractMessagesFromThread(thread);
 
@@ -158,22 +177,8 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
         return;
       }
 
-      // אם אין reservationId — לא יכולים לבדוק אם אורח חוזר, מדלגים
-      if (!reservationId) {
-        log.info("No reservationId in messageReceived event, skipping");
-        return;
-      }
-
       const reservation = await getReservation(reservationId);
       if (!reservation) return;
-
-      // מנתח הודעות רק אם אורח חוזר
-      if (!reservation.isReturningGuest) {
-        log.info("Not a returning guest, skipping message analysis");
-        return;
-      }
-
-      log.info("Returning guest — analyzing message");
 
       const listing = reservation.listingId
         ? await getListing(reservation.listingId)
@@ -186,30 +191,10 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
         listingTitle: listing?.title ?? "Unknown",
         country: listing?.country ?? "",
         status,
+        isReturningGuest: reservation.isReturningGuest,
       });
 
-      const analysis = await analyze(reservation.guestName, guestMessages);
-      log.info("Analysis result", { isOpportunity: analysis.isOpportunity });
-
-      if (!analysis.isOpportunity) {
-        log.info("No opportunity identified");
-        return;
-      }
-
-      const alertParams = buildAlertParams({
-        country: listing?.country ?? "",
-        guestName: reservation.guestName,
-        listingTitle: listing?.title ?? "Unknown",
-        checkIn: reservation.checkIn,
-        checkOut: reservation.checkOut,
-        source: reservation.source,
-        status,
-        material: analysis.material,
-        personal: analysis.personal,
-        why: analysis.why,
-      });
-
-      await sendAlert(alertParams);
+      await handleAnalysis({ reservationId, guestMessages, reservation, listing, status });
       return;
     }
 

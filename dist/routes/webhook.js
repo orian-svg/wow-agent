@@ -5,6 +5,7 @@ const logger_js_1 = require("../lib/logger.js");
 const guesty_js_1 = require("../services/guesty.js");
 const slack_js_1 = require("../services/slack.js");
 const analyzer_js_1 = require("../services/analyzer.js");
+const memory_js_1 = require("../lib/memory.js");
 const log = (0, logger_js_1.createLogger)("webhook");
 function formatStatus(status, isReturningGuest) {
     if (isReturningGuest)
@@ -45,10 +46,34 @@ function wasJustConfirmed(event) {
     const oldStatus = event?.reservationBefore?.status ??
         event?.data?.reservationBefore?.status ??
         "";
-    const confirmedStatuses = ["confirmed", "inquiry", "reserved"];
     const wasInquiry = ["inquiry", "reserved", "pending"].includes(oldStatus.toLowerCase());
     const isNowConfirmed = newStatus.toLowerCase() === "confirmed";
     return wasInquiry && isNowConfirmed;
+}
+async function handleAnalysis({ reservationId, guestMessages, reservation, listing, status, }) {
+    // שלב 1: בדוק מה כבר נשלח עבור ההזמנה הזו
+    const pastOpportunities = (0, memory_js_1.getPastOpportunities)(reservationId);
+    const analysis = await (0, analyzer_js_1.analyze)(reservation.guestName, guestMessages, pastOpportunities);
+    log.info("Analysis result", { isOpportunity: analysis.isOpportunity });
+    if (!analysis.isOpportunity) {
+        log.info("No new opportunity identified");
+        return;
+    }
+    const alertParams = (0, slack_js_1.buildAlertParams)({
+        country: listing?.country ?? "",
+        guestName: reservation.guestName,
+        listingTitle: listing?.title ?? "Unknown",
+        checkIn: reservation.checkIn,
+        checkOut: reservation.checkOut,
+        source: reservation.source,
+        status,
+        material: analysis.material,
+        personal: analysis.personal,
+        why: analysis.why,
+    });
+    await (0, slack_js_1.sendAlert)(alertParams);
+    // שמור שנשלחה המלצה כדי לא לחזור עליה
+    (0, memory_js_1.recordOpportunity)(reservationId, analysis.why);
 }
 async function webhookHandler(req, res) {
     res.sendStatus(200);
@@ -59,22 +84,21 @@ async function webhookHandler(req, res) {
         log.debug("Full payload", JSON.stringify(event).substring(0, 500));
         const reservationId = extractReservationId(event);
         const conversationId = extractConversationId(event);
+        // שלב 3: אם אין reservationId — לא עושים כלום
+        if (!reservationId) {
+            log.info("No reservationId found, skipping");
+            return;
+        }
         // --- מסלול 1: reservation.updated ---
-        // מנתח רק אם ההזמנה עברה מ-inquiry ל-confirmed
         if (eventType === "reservation.updated") {
             if (!wasJustConfirmed(event)) {
                 log.info("reservation.updated but not a confirmation transition, skipping");
                 return;
             }
             log.info("Reservation just confirmed — analyzing full conversation");
-            if (!reservationId) {
-                log.warn("No reservationId in reservation.updated event, skipping");
-                return;
-            }
             const reservation = await (0, guesty_js_1.getReservation)(reservationId);
             if (!reservation)
                 return;
-            // נסה לקחת שיחה מה-thread של ה-event, אחרת קרא מגסטי
             const thread = event?.conversation?.thread ?? [];
             let guestMessages = extractMessagesFromThread(thread);
             if (!guestMessages && conversationId) {
@@ -94,53 +118,22 @@ async function webhookHandler(req, res) {
                 country: listing?.country ?? "",
                 status,
             });
-            const analysis = await (0, analyzer_js_1.analyze)(reservation.guestName, guestMessages);
-            log.info("Analysis result", { isOpportunity: analysis.isOpportunity });
-            if (!analysis.isOpportunity) {
-                log.info("No opportunity identified");
-                return;
-            }
-            const alertParams = (0, slack_js_1.buildAlertParams)({
-                country: listing?.country ?? "",
-                guestName: reservation.guestName,
-                listingTitle: listing?.title ?? "Unknown",
-                checkIn: reservation.checkIn,
-                checkOut: reservation.checkOut,
-                source: reservation.source,
-                status,
-                material: analysis.material,
-                personal: analysis.personal,
-                why: analysis.why,
-            });
-            await (0, slack_js_1.sendAlert)(alertParams);
+            await handleAnalysis({ reservationId, guestMessages, reservation, listing, status });
             return;
         }
         // --- מסלול 2: reservation.messageReceived ---
-        // מנתח רק אם אורח חוזר
+        // שלב 2: מנתח כל הודעה (לא רק אורחים חוזרים)
         if (eventType === "reservation.messageReceived") {
             const conversation = event?.conversation ?? {};
             const thread = conversation.thread ?? [];
-            const meta = conversation.meta ?? {};
-            const firstReservation = meta.reservations?.[0];
             const guestMessages = extractMessagesFromThread(thread);
             if (!guestMessages) {
                 log.info("No guest messages found, skipping");
                 return;
             }
-            // אם אין reservationId — לא יכולים לבדוק אם אורח חוזר, מדלגים
-            if (!reservationId) {
-                log.info("No reservationId in messageReceived event, skipping");
-                return;
-            }
             const reservation = await (0, guesty_js_1.getReservation)(reservationId);
             if (!reservation)
                 return;
-            // מנתח הודעות רק אם אורח חוזר
-            if (!reservation.isReturningGuest) {
-                log.info("Not a returning guest, skipping message analysis");
-                return;
-            }
-            log.info("Returning guest — analyzing message");
             const listing = reservation.listingId
                 ? await (0, guesty_js_1.getListing)(reservation.listingId)
                 : null;
@@ -150,26 +143,9 @@ async function webhookHandler(req, res) {
                 listingTitle: listing?.title ?? "Unknown",
                 country: listing?.country ?? "",
                 status,
+                isReturningGuest: reservation.isReturningGuest,
             });
-            const analysis = await (0, analyzer_js_1.analyze)(reservation.guestName, guestMessages);
-            log.info("Analysis result", { isOpportunity: analysis.isOpportunity });
-            if (!analysis.isOpportunity) {
-                log.info("No opportunity identified");
-                return;
-            }
-            const alertParams = (0, slack_js_1.buildAlertParams)({
-                country: listing?.country ?? "",
-                guestName: reservation.guestName,
-                listingTitle: listing?.title ?? "Unknown",
-                checkIn: reservation.checkIn,
-                checkOut: reservation.checkOut,
-                source: reservation.source,
-                status,
-                material: analysis.material,
-                personal: analysis.personal,
-                why: analysis.why,
-            });
-            await (0, slack_js_1.sendAlert)(alertParams);
+            await handleAnalysis({ reservationId, guestMessages, reservation, listing, status });
             return;
         }
         log.info("Unknown event type, skipping", { eventType });
