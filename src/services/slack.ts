@@ -1,6 +1,7 @@
 import { config } from "../config.js";
 import { createLogger } from "../lib/logger.js";
 import type { SlackAlertParams } from "../types.js";
+import type { SentimentAnalysis } from "./sentiment.js";
 
 const log = createLogger("slack");
 
@@ -39,6 +40,12 @@ function formatSource(source: string | null): string {
   };
   const key = source.toLowerCase();
   return map[key] ?? source;
+}
+
+function urgencyEmoji(urgency: "low" | "medium" | "high"): string {
+  if (urgency === "high") return "🔴";
+  if (urgency === "medium") return "🟡";
+  return "🟢";
 }
 
 export function resolveChannel(country: string): string {
@@ -89,13 +96,51 @@ export async function sendAlert(params: SlackAlertParams): Promise<void> {
     `*Why:* "${params.why}"`,
   ].join("\n");
 
+  await postToSlack(params.channel, text);
+}
+
+export async function sendUnhappyAlert(params: {
+  country: string;
+  guestName: string;
+  listingTitle: string;
+  checkIn: string | null;
+  checkOut: string | null;
+  source: string | null;
+  messageCount: number;
+  sentiment: SentimentAnalysis;
+}): Promise<void> {
+  const emoji = urgencyEmoji(params.sentiment.urgency);
+  const urgencyLabel = params.sentiment.urgency.charAt(0).toUpperCase() + params.sentiment.urgency.slice(1);
+
+  const text = [
+    `*Unhappy Guest* ${emoji}`,
+    "",
+    `*Guest:* ${params.guestName}`,
+    `*Listing:* ${params.listingTitle}`,
+    `*Location:* ${params.country || "Unknown"}`,
+    `*Check-in:* ${formatDate(params.checkIn)}`,
+    `*Check-out:* ${formatDate(params.checkOut)}`,
+    `*Source:* ${formatSource(params.source)}`,
+    `*Messages in conversation:* ${params.messageCount}`,
+    "",
+    `*Urgency:* ${urgencyLabel}`,
+    `*Guest tone:* ${params.sentiment.guestTone}`,
+    `*Issue:* ${params.sentiment.issue}`,
+    `*Suggested action:* ${params.sentiment.suggestion}`,
+  ].join("\n");
+
+  const channel = channelForCountry(params.country);
+  await postToSlack(channel, text);
+}
+
+async function postToSlack(channel: string, text: string): Promise<void> {
   const response = await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${config.slackBotToken}`,
     },
-    body: JSON.stringify({ channel: params.channel, text }),
+    body: JSON.stringify({ channel, text }),
   });
 
   if (!response.ok) {
@@ -108,5 +153,5 @@ export async function sendAlert(params: SlackAlertParams): Promise<void> {
     throw new Error(`Slack returned error: ${data.error}`);
   }
 
-  log.info(`Alert sent to ${params.channel}`);
+  log.info(`Alert sent to ${channel}`);
 }
