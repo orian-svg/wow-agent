@@ -13,6 +13,14 @@ function channelForCountry(country: string): string {
   return config.slackChannelIsrael;
 }
 
+function unhappyChannelForCountry(country: string): string {
+  const normalized = country.trim().toLowerCase();
+  if (normalized === "greece" || normalized === "gr") {
+    return config.slackChannelUnhappyAthens;
+  }
+  return config.slackChannelUnhappyIsrael;
+}
+
 function formatDate(iso: string | null): string {
   if (!iso) return "Unknown";
   try {
@@ -129,7 +137,7 @@ export async function sendUnhappyAlert(params: {
     `*Suggested action:* ${params.sentiment.suggestion}`,
   ].join("\n");
 
-  const channel = channelForCountry(params.country);
+  const channel = unhappyChannelForCountry(params.country);
   await postToSlack(channel, text);
 }
 

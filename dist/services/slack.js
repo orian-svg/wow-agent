@@ -14,6 +14,13 @@ function channelForCountry(country) {
     }
     return config_js_1.config.slackChannelIsrael;
 }
+function unhappyChannelForCountry(country) {
+    const normalized = country.trim().toLowerCase();
+    if (normalized === "greece" || normalized === "gr") {
+        return config_js_1.config.slackChannelUnhappyAthens;
+    }
+    return config_js_1.config.slackChannelUnhappyIsrael;
+}
 function formatDate(iso) {
     if (!iso)
         return "Unknown";
@@ -106,7 +113,7 @@ async function sendUnhappyAlert(params) {
         `*Issue:* ${params.sentiment.issue}`,
         `*Suggested action:* ${params.sentiment.suggestion}`,
     ].join("\n");
-    const channel = channelForCountry(params.country);
+    const channel = unhappyChannelForCountry(params.country);
     await postToSlack(channel, text);
 }
 async function postToSlack(channel, text) {

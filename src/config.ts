@@ -8,6 +8,8 @@ interface Config {
   slackBotToken: string;
   slackChannelIsrael: string;
   slackChannelAthens: string;
+  slackChannelUnhappyIsrael: string;
+  slackChannelUnhappyAthens: string;
   logLevel: "debug" | "info" | "warn" | "error";
 }
 
@@ -31,5 +33,7 @@ export const config: Config = {
   slackBotToken: requireEnv("SLACK_BOT_TOKEN"),
   slackChannelIsrael: optionalEnv("SLACK_CHANNEL_ISRAEL", "#wow-israel"),
   slackChannelAthens: optionalEnv("SLACK_CHANNEL_ATHENS", "#wow-athens"),
+  slackChannelUnhappyIsrael: optionalEnv("SLACK_CHANNEL_UNHAPPY_ISRAEL", "#unhappy-israel"),
+  slackChannelUnhappyAthens: optionalEnv("SLACK_CHANNEL_UNHAPPY_ATHENS", "#unhappy-athens"),
   logLevel: (optionalEnv("LOG_LEVEL", "info") as Config["logLevel"]),
 };
