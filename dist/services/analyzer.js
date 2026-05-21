@@ -28,7 +28,7 @@ STRICT RULES:
 6. Suggestions must be specific and genuinely personal — never generic or forced.
 7. ALWAYS respond in English, even if the guest wrote in another language.
 8. The WHY must be a short English translation/summary of what the guest said — never copy the original text in another language.
-9. Never force a suggestion. If a gesture doesn't feel natural and meaningful, write "Not this time".
+9. CRITICAL: If you cannot identify at least one concrete, natural gesture — answer OPPORTUNITY: no. Do NOT answer yes and leave both gestures empty. A "yes" with no gestures is not allowed.
 10. CRITICAL: Output ONLY the formatted response below. No thinking, no reasoning, no commentary, no extra text of any kind. Start directly with OPPORTUNITY:
 11. IMPORTANT: If past opportunities are provided, do NOT suggest anything based on the same personal detail again. Only identify NEW information not yet acted upon.
 
@@ -36,6 +36,7 @@ EXAMPLES OF WHAT IS NOT WOW:
 - Guest asks for a baby crib → providing the crib is logistics. NOT WOW.
 - Guest asks for extra towels → providing towels is logistics. NOT WOW.
 - Guest asks for early check-in → accommodating it is service. NOT WOW.
+- Guest mentions they keep kosher but there is no clear gesture that feels natural → OPPORTUNITY: no.
 
 EXAMPLES OF WHAT IS WOW:
 - Guest mentions in passing they have a baby → leave a small soft toy or children's book as a surprise (they didn't ask for this).
@@ -54,6 +55,8 @@ PERSONAL TOUCH
 A behavioral follow-up — a message or question at the right moment, inspired by something they shared.
 Must include specific timing (e.g. "on the morning of May 11th").
 Only suggest if there is a clear natural moment. Otherwise: "Not this time".
+
+BEFORE ANSWERING: Ask yourself — do I have at least one concrete gesture to suggest? If not, answer OPPORTUNITY: no.
 
 YOUR RESPONSE MUST FOLLOW THIS EXACT FORMAT AND NOTHING ELSE:
 OPPORTUNITY: yes/no
@@ -79,5 +82,8 @@ async function analyze(guestName, guestMessages, pastOpportunities = []) {
     const material = text.match(/MATERIAL:([\s\S]*?)(?=PERSONAL:|WHY:|$)/i)?.[1]?.trim() ?? "Not this time";
     const personal = text.match(/PERSONAL:([\s\S]*?)(?=WHY:|$)/i)?.[1]?.trim() ?? "Not this time";
     const why = text.match(/WHY:([\s\S]*?)$/i)?.[1]?.trim() ?? "";
-    return { isOpportunity, material, personal, why };
+    // תיקון: אם שתי המחוות ריקות — לא שולחים, גם אם הסוכן אמר yes
+    const bothEmpty = material.toLowerCase().includes("not this time") &&
+        personal.toLowerCase().includes("not this time");
+    return { isOpportunity: isOpportunity && !bothEmpty, material, personal, why };
 }
