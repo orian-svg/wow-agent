@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { createLogger } from "../lib/logger.js";
-import { getListing, getReservation, getConversation } from "../services/guesty.js";
+import { getListing, getReservation, getConversation, getGuestHistory } from "../services/guesty.js";
 import { buildAlertParams, sendAlert, sendUnhappyAlert, sendUnhappyResolved } from "../services/slack.js";
 import { analyze } from "../services/analyzer.js";
 import { analyzeSentiment } from "../services/sentiment.js";
@@ -83,16 +83,26 @@ async function handleAnalysis({
   reservationId: string;
   guestMessages: string;
   messageCount: number;
-  reservation: { guestName: string; checkIn: string; checkOut: string; source: string; status: string };
+  reservation: { guestId: string; guestName: string; checkIn: string; checkOut: string; source: string; status: string; isReturningGuest: boolean };
   listing: { country: string; title: string } | null;
   status: string;
   runSentiment: boolean;
 }): Promise<void> {
   const pastOpportunities = getPastOpportunities(reservationId);
+
+  // שליפת היסטוריה רק אם יש מזהה אורח
+  let guestHistory = "";
+  if (reservation.guestId) {
+    guestHistory = await getGuestHistory(reservation.guestId);
+    if (guestHistory) {
+      log.info(`Guest history loaded for ${reservation.guestName} (${guestHistory.length} chars)`);
+    }
+  }
+
   const promises: Promise<void>[] = [];
 
   promises.push(
-    analyze(reservation.guestName, guestMessages, pastOpportunities).then(async (analysis) => {
+    analyze(reservation.guestName, guestMessages, pastOpportunities, guestHistory).then(async (analysis) => {
       log.info("WOW analysis result", { isOpportunity: analysis.isOpportunity });
       if (!analysis.isOpportunity) return;
 
@@ -125,10 +135,8 @@ async function handleAnalysis({
         const newRank = URGENCY_RANK[newUrgency];
         const lastRank = lastUrgency !== undefined ? URGENCY_RANK[lastUrgency] : undefined;
 
-        // אם אין היסטוריה ואורח מרוצה — לא עושים כלום
         if (!sentiment.isUnhappy && lastUrgency === undefined) return;
 
-        // אם הדחיפות עלתה — שולחים התראה
         if (sentiment.isUnhappy && (lastRank === undefined || newRank > lastRank)) {
           const ts = await sendUnhappyAlert({
             country: listing?.country ?? "",
@@ -145,7 +153,6 @@ async function handleAnalysis({
           return;
         }
 
-        // אם הדחיפות ירדה או הבעיה נפתרה — שולחים עדכון ירוק בשרשור
         if (lastUrgency !== undefined && newRank < lastRank! && threadTs) {
           await sendUnhappyResolved({
             country: listing?.country ?? "",

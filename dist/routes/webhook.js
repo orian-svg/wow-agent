@@ -56,8 +56,16 @@ function wasJustConfirmed(event) {
 }
 async function handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment, }) {
     const pastOpportunities = (0, memory_js_1.getPastOpportunities)(reservationId);
+    // שליפת היסטוריה רק אם יש מזהה אורח
+    let guestHistory = "";
+    if (reservation.guestId) {
+        guestHistory = await (0, guesty_js_1.getGuestHistory)(reservation.guestId);
+        if (guestHistory) {
+            log.info(`Guest history loaded for ${reservation.guestName} (${guestHistory.length} chars)`);
+        }
+    }
     const promises = [];
-    promises.push((0, analyzer_js_1.analyze)(reservation.guestName, guestMessages, pastOpportunities).then(async (analysis) => {
+    promises.push((0, analyzer_js_1.analyze)(reservation.guestName, guestMessages, pastOpportunities, guestHistory).then(async (analysis) => {
         log.info("WOW analysis result", { isOpportunity: analysis.isOpportunity });
         if (!analysis.isOpportunity)
             return;
@@ -84,10 +92,8 @@ async function handleAnalysis({ reservationId, guestMessages, messageCount, rese
             const newUrgency = sentiment.isUnhappy ? sentiment.urgency : "resolved";
             const newRank = memory_js_1.URGENCY_RANK[newUrgency];
             const lastRank = lastUrgency !== undefined ? memory_js_1.URGENCY_RANK[lastUrgency] : undefined;
-            // אם אין היסטוריה ואורח מרוצה — לא עושים כלום
             if (!sentiment.isUnhappy && lastUrgency === undefined)
                 return;
-            // אם הדחיפות עלתה — שולחים התראה
             if (sentiment.isUnhappy && (lastRank === undefined || newRank > lastRank)) {
                 const ts = await (0, slack_js_1.sendUnhappyAlert)({
                     country: listing?.country ?? "",
@@ -103,7 +109,6 @@ async function handleAnalysis({ reservationId, guestMessages, messageCount, rese
                 (0, memory_js_1.recordUnhappyAlert)(reservationId, newUrgency, threadTs ? undefined : ts);
                 return;
             }
-            // אם הדחיפות ירדה או הבעיה נפתרה — שולחים עדכון ירוק בשרשור
             if (lastUrgency !== undefined && newRank < lastRank && threadTs) {
                 await (0, slack_js_1.sendUnhappyResolved)({
                     country: listing?.country ?? "",

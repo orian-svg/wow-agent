@@ -8,6 +8,7 @@ const log = createLogger("guesty");
 const TOKEN_CACHE = new Cache<string>(1380);
 const LISTING_CACHE = new Cache<GuestyListing>(60);
 const RESERVATION_CACHE = new Cache<GuestyReservation>(10);
+const GUEST_HISTORY_CACHE = new Cache<string>(60);
 
 const TOKEN_KEY = "current";
 
@@ -137,7 +138,12 @@ export async function getReservation(
       source?: string;
       status?: string;
       isReturningGuest?: boolean;
-      guest?: { fullName?: string; firstName?: string; lastName?: string };
+      guest?: {
+        _id?: string;
+        fullName?: string;
+        firstName?: string;
+        lastName?: string;
+      };
     };
 
     const firstName = data.guest?.firstName ?? "";
@@ -148,6 +154,7 @@ export async function getReservation(
 
     const reservation: GuestyReservation = {
       id: data._id,
+      guestId: data.guest?._id ?? "",
       listingId: data.listingId ?? "",
       checkIn: data.checkIn ?? "",
       checkOut: data.checkOut ?? "",
@@ -158,7 +165,7 @@ export async function getReservation(
     };
 
     RESERVATION_CACHE.set(reservationId, reservation);
-    log.info(`Reservation ${reservationId} loaded (status: ${reservation.status}, returning: ${reservation.isReturningGuest})`);
+    log.info(`Reservation ${reservationId} loaded (status: ${reservation.status}, returning: ${reservation.isReturningGuest}, guestId: ${reservation.guestId})`);
     return reservation;
   } catch (err) {
     log.error(`Failed to load reservation ${reservationId}`, { error: String(err) });
@@ -182,6 +189,50 @@ export async function getConversation(conversationId: string): Promise<string> {
     return messages;
   } catch (err) {
     log.error(`Failed to load conversation ${conversationId}`, { error: String(err) });
+    return "";
+  }
+}
+
+// שולף את כל השיחות ההיסטוריות של אורח לפי מזהה האורח
+export async function getGuestHistory(guestId: string): Promise<string> {
+  if (!guestId) return "";
+
+  const cached = GUEST_HISTORY_CACHE.get(guestId);
+  if (cached) {
+    log.debug(`Guest history for ${guestId} served from cache`);
+    return cached;
+  }
+
+  try {
+    const filters = JSON.stringify([{ field: "guest._id", operator: "$eq", value: guestId }]);
+    const data = (await guestyGet(
+      `/v1/communication/conversations?filters=${encodeURIComponent(filters)}&limit=20&sort=-createdAt`
+    )) as {
+      results?: Array<{
+        thread?: Array<{ type: string; body?: string; createdAt?: string }>;
+        createdAt?: string;
+      }>;
+    };
+
+    const conversations = data.results ?? [];
+
+    const history = conversations
+      .map((conv) => {
+        const messages = (conv.thread ?? [])
+          .filter((m) => m.type === "fromGuest")
+          .map((m) => m.body ?? "")
+          .filter((b) => b.trim().length > 0)
+          .join("\n");
+        return messages;
+      })
+      .filter((m) => m.length > 0)
+      .join("\n---\n");
+
+    GUEST_HISTORY_CACHE.set(guestId, history);
+    log.info(`Guest history for ${guestId} loaded (${conversations.length} conversations, ${history.length} chars)`);
+    return history;
+  } catch (err) {
+    log.error(`Failed to load guest history for ${guestId}`, { error: String(err) });
     return "";
   }
 }

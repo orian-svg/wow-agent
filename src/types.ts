@@ -7,6 +7,7 @@ export interface GuestyListing {
 
 export interface GuestyReservation {
   id: string;
+  guestId: string;
   listingId: string;
   checkIn: string;
   checkOut: string;

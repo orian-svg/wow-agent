@@ -31,6 +31,7 @@ STRICT RULES:
 9. CRITICAL: If you cannot identify at least one concrete, natural gesture — answer OPPORTUNITY: no. Do NOT answer yes and leave both gestures empty. A "yes" with no gestures is not allowed.
 10. CRITICAL: Output ONLY the formatted response below. No thinking, no reasoning, no commentary, no extra text of any kind. Start directly with OPPORTUNITY:
 11. IMPORTANT: If past opportunities are provided, do NOT suggest anything based on the same personal detail again. Only identify NEW information not yet acted upon.
+12. If guest history from previous stays is provided, use it to identify returning patterns, personal details, or meaningful follow-ups. A returning guest who had a specific experience before is a special WOW opportunity.
 
 EXAMPLES OF WHAT IS NOT WOW:
 - Guest asks for a baby crib → providing the crib is logistics. NOT WOW.
@@ -43,6 +44,7 @@ EXAMPLES OF WHAT IS WOW:
 - Guest mentions they're running a marathon → leave protein snacks and a running towel (they didn't ask for this).
 - Guest mentions it's their anniversary → leave wine and a handwritten card (they didn't ask for this).
 - Guest mentions marathon on May 10th → send a follow-up message on May 11th asking how it went (they didn't ask for this).
+- Returning guest previously mentioned a health issue → send a warm personal follow-up asking how they are doing.
 
 TWO TYPES OF GESTURES — evaluate each independently:
 
@@ -63,8 +65,11 @@ OPPORTUNITY: yes/no
 MATERIAL: [specific material gesture, or "Not this time"]
 PERSONAL: [specific personal touch with exact timing, or "Not this time"]
 WHY: [one sentence in English summarizing what the guest shared that creates this opportunity]`;
-async function analyze(guestName, guestMessages, pastOpportunities = []) {
-    let userContent = `Guest: ${guestName}\n\nGuest messages:\n${guestMessages}`;
+async function analyze(guestName, guestMessages, pastOpportunities = [], guestHistory = "") {
+    let userContent = `Guest: ${guestName}\n\nCurrent stay messages:\n${guestMessages}`;
+    if (guestHistory) {
+        userContent += `\n\nPREVIOUS STAYS HISTORY (messages from past visits):\n${guestHistory}`;
+    }
     if (pastOpportunities.length > 0) {
         userContent += `\n\nPAST OPPORTUNITIES ALREADY SENT FOR THIS RESERVATION (do NOT repeat these):\n`;
         userContent += pastOpportunities.map((o, i) => `${i + 1}. ${o}`).join("\n");
@@ -82,7 +87,6 @@ async function analyze(guestName, guestMessages, pastOpportunities = []) {
     const material = text.match(/MATERIAL:([\s\S]*?)(?=PERSONAL:|WHY:|$)/i)?.[1]?.trim() ?? "Not this time";
     const personal = text.match(/PERSONAL:([\s\S]*?)(?=WHY:|$)/i)?.[1]?.trim() ?? "Not this time";
     const why = text.match(/WHY:([\s\S]*?)$/i)?.[1]?.trim() ?? "";
-    // תיקון: אם שתי המחוות ריקות — לא שולחים, גם אם הסוכן אמר yes
     const bothEmpty = material.toLowerCase().includes("not this time") &&
         personal.toLowerCase().includes("not this time");
     return { isOpportunity: isOpportunity && !bothEmpty, material, personal, why };
