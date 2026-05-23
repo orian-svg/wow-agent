@@ -79,18 +79,41 @@ async function handleAnalysis({ reservationId, guestMessages, messageCount, rese
     if (runSentiment) {
         promises.push((0, sentiment_js_1.analyzeSentiment)(reservation.guestName, guestMessages, messageCount).then(async (sentiment) => {
             log.info("Sentiment analysis result", { isUnhappy: sentiment.isUnhappy, urgency: sentiment.urgency });
-            if (!sentiment.isUnhappy)
+            const lastUrgency = (0, memory_js_1.getLastUnhappyUrgency)(reservationId);
+            const threadTs = (0, memory_js_1.getUnhappyThreadTs)(reservationId);
+            const newUrgency = sentiment.isUnhappy ? sentiment.urgency : "resolved";
+            const newRank = memory_js_1.URGENCY_RANK[newUrgency];
+            const lastRank = lastUrgency !== undefined ? memory_js_1.URGENCY_RANK[lastUrgency] : undefined;
+            // אם אין היסטוריה ואורח מרוצה — לא עושים כלום
+            if (!sentiment.isUnhappy && lastUrgency === undefined)
                 return;
-            await (0, slack_js_1.sendUnhappyAlert)({
-                country: listing?.country ?? "",
-                guestName: reservation.guestName,
-                listingTitle: listing?.title ?? "Unknown",
-                checkIn: reservation.checkIn,
-                checkOut: reservation.checkOut,
-                source: reservation.source,
-                messageCount,
-                sentiment,
-            });
+            // אם הדחיפות עלתה — שולחים התראה
+            if (sentiment.isUnhappy && (lastRank === undefined || newRank > lastRank)) {
+                const ts = await (0, slack_js_1.sendUnhappyAlert)({
+                    country: listing?.country ?? "",
+                    guestName: reservation.guestName,
+                    listingTitle: listing?.title ?? "Unknown",
+                    checkIn: reservation.checkIn,
+                    checkOut: reservation.checkOut,
+                    source: reservation.source,
+                    messageCount,
+                    sentiment,
+                    threadTs,
+                });
+                (0, memory_js_1.recordUnhappyAlert)(reservationId, newUrgency, threadTs ? undefined : ts);
+                return;
+            }
+            // אם הדחיפות ירדה או הבעיה נפתרה — שולחים עדכון ירוק בשרשור
+            if (lastUrgency !== undefined && newRank < lastRank && threadTs) {
+                await (0, slack_js_1.sendUnhappyResolved)({
+                    country: listing?.country ?? "",
+                    guestName: reservation.guestName,
+                    isFullyResolved: !sentiment.isUnhappy,
+                    newUrgency: sentiment.isUnhappy ? sentiment.urgency : undefined,
+                    threadTs,
+                });
+                (0, memory_js_1.recordUnhappyAlert)(reservationId, newUrgency);
+            }
         }));
     }
     await Promise.all(promises);

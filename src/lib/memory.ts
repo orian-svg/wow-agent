@@ -6,8 +6,12 @@ const log = createLogger("memory");
 
 const MEMORY_FILE = path.resolve("./data/memory.json");
 
+export type Urgency = "low" | "medium" | "high" | "resolved";
+
 interface ReservationMemory {
-  sentOpportunities: string[]; // free-text descriptions of what was already sent
+  sentOpportunities: string[];
+  lastUnhappyUrgency?: Urgency;
+  unhappySlackTs?: string;
 }
 
 type MemoryStore = Record<string, ReservationMemory>;
@@ -46,4 +50,38 @@ export function recordOpportunity(reservationId: string, why: string): void {
   store[reservationId].sentOpportunities.push(why);
   saveStore(store);
   log.info(`Recorded opportunity for reservation ${reservationId}`);
+}
+
+export const URGENCY_RANK: Record<Urgency, number> = {
+  resolved: -1,
+  low: 0,
+  medium: 1,
+  high: 2,
+};
+
+export function getLastUnhappyUrgency(reservationId: string): Urgency | undefined {
+  const store = loadStore();
+  return store[reservationId]?.lastUnhappyUrgency;
+}
+
+export function getUnhappyThreadTs(reservationId: string): string | undefined {
+  const store = loadStore();
+  return store[reservationId]?.unhappySlackTs;
+}
+
+export function recordUnhappyAlert(
+  reservationId: string,
+  urgency: Urgency,
+  slackTs?: string
+): void {
+  const store = loadStore();
+  if (!store[reservationId]) {
+    store[reservationId] = { sentOpportunities: [] };
+  }
+  store[reservationId].lastUnhappyUrgency = urgency;
+  if (slackTs) {
+    store[reservationId].unhappySlackTs = slackTs;
+  }
+  saveStore(store);
+  log.info(`Recorded unhappy alert for reservation ${reservationId} (urgency: ${urgency})`);
 }

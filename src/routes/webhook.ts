@@ -1,10 +1,18 @@
 import type { Request, Response } from "express";
 import { createLogger } from "../lib/logger.js";
 import { getListing, getReservation, getConversation } from "../services/guesty.js";
-import { buildAlertParams, sendAlert, sendUnhappyAlert } from "../services/slack.js";
+import { buildAlertParams, sendAlert, sendUnhappyAlert, sendUnhappyResolved } from "../services/slack.js";
 import { analyze } from "../services/analyzer.js";
 import { analyzeSentiment } from "../services/sentiment.js";
-import { getPastOpportunities, recordOpportunity } from "../lib/memory.js";
+import {
+  getPastOpportunities,
+  recordOpportunity,
+  getLastUnhappyUrgency,
+  getUnhappyThreadTs,
+  recordUnhappyAlert,
+  URGENCY_RANK,
+} from "../lib/memory.js";
+import type { Urgency } from "../lib/memory.js";
 import type { GuestyMessage, WebhookContext } from "../types.js";
 
 const log = createLogger("webhook");
@@ -38,7 +46,6 @@ function extractReservationId(event: any): string | null {
   const conversation = event?.conversation ?? {};
   const meta = conversation.meta ?? {};
   const firstReservation = meta.reservations?.[0];
-
   return (
     event?.reservationId ??
     event?.reservation?._id ??
@@ -59,10 +66,8 @@ function wasJustConfirmed(event: any): boolean {
     event?.reservationBefore?.status ??
     event?.data?.reservationBefore?.status ??
     "";
-
   const wasInquiry = ["inquiry", "reserved", "pending"].includes(oldStatus.toLowerCase());
   const isNowConfirmed = newStatus.toLowerCase() === "confirmed";
-
   return wasInquiry && isNowConfirmed;
 }
 
@@ -113,18 +118,44 @@ async function handleAnalysis({
     promises.push(
       analyzeSentiment(reservation.guestName, guestMessages, messageCount).then(async (sentiment) => {
         log.info("Sentiment analysis result", { isUnhappy: sentiment.isUnhappy, urgency: sentiment.urgency });
-        if (!sentiment.isUnhappy) return;
 
-        await sendUnhappyAlert({
-          country: listing?.country ?? "",
-          guestName: reservation.guestName,
-          listingTitle: listing?.title ?? "Unknown",
-          checkIn: reservation.checkIn,
-          checkOut: reservation.checkOut,
-          source: reservation.source,
-          messageCount,
-          sentiment,
-        });
+        const lastUrgency = getLastUnhappyUrgency(reservationId);
+        const threadTs = getUnhappyThreadTs(reservationId);
+        const newUrgency: Urgency = sentiment.isUnhappy ? sentiment.urgency : "resolved";
+        const newRank = URGENCY_RANK[newUrgency];
+        const lastRank = lastUrgency !== undefined ? URGENCY_RANK[lastUrgency] : undefined;
+
+        // אם אין היסטוריה ואורח מרוצה — לא עושים כלום
+        if (!sentiment.isUnhappy && lastUrgency === undefined) return;
+
+        // אם הדחיפות עלתה — שולחים התראה
+        if (sentiment.isUnhappy && (lastRank === undefined || newRank > lastRank)) {
+          const ts = await sendUnhappyAlert({
+            country: listing?.country ?? "",
+            guestName: reservation.guestName,
+            listingTitle: listing?.title ?? "Unknown",
+            checkIn: reservation.checkIn,
+            checkOut: reservation.checkOut,
+            source: reservation.source,
+            messageCount,
+            sentiment,
+            threadTs,
+          });
+          recordUnhappyAlert(reservationId, newUrgency, threadTs ? undefined : ts);
+          return;
+        }
+
+        // אם הדחיפות ירדה או הבעיה נפתרה — שולחים עדכון ירוק בשרשור
+        if (lastUrgency !== undefined && newRank < lastRank! && threadTs) {
+          await sendUnhappyResolved({
+            country: listing?.country ?? "",
+            guestName: reservation.guestName,
+            isFullyResolved: !sentiment.isUnhappy,
+            newUrgency: sentiment.isUnhappy ? sentiment.urgency : undefined,
+            threadTs,
+          });
+          recordUnhappyAlert(reservationId, newUrgency);
+        }
       })
     );
   }

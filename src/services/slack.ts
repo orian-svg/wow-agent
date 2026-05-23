@@ -116,12 +116,16 @@ export async function sendUnhappyAlert(params: {
   source: string | null;
   messageCount: number;
   sentiment: SentimentAnalysis;
-}): Promise<void> {
+  threadTs?: string;
+}): Promise<string | undefined> {
   const emoji = urgencyEmoji(params.sentiment.urgency);
   const urgencyLabel = params.sentiment.urgency.charAt(0).toUpperCase() + params.sentiment.urgency.slice(1);
+  const isUpdate = !!params.threadTs;
 
   const text = [
-    `*Unhappy Guest* ${emoji}`,
+    isUpdate
+      ? `*Urgency escalated to ${urgencyLabel}* ${emoji}`
+      : `*Unhappy Guest* ${emoji}`,
     "",
     `*Guest:* ${params.guestName}`,
     `*Listing:* ${params.listingTitle}`,
@@ -138,28 +142,67 @@ export async function sendUnhappyAlert(params: {
   ].join("\n");
 
   const channel = unhappyChannelForCountry(params.country);
-  await postToSlack(channel, text);
+  return await postToSlack(channel, text, params.threadTs);
 }
 
-async function postToSlack(channel: string, text: string): Promise<void> {
+export async function sendUnhappyResolved(params: {
+  country: string;
+  guestName: string;
+  isFullyResolved: boolean;
+  newUrgency?: "low" | "medium" | "high";
+  threadTs: string;
+}): Promise<void> {
+  let text: string;
+
+  if (params.isFullyResolved) {
+    text = [
+      `*Issue resolved* ✅`,
+      "",
+      `*Guest:* ${params.guestName}`,
+      `Guest appears satisfied — no further action needed.`,
+    ].join("\n");
+  } else {
+    const emoji = urgencyEmoji(params.newUrgency!);
+    const urgencyLabel = params.newUrgency!.charAt(0).toUpperCase() + params.newUrgency!.slice(1);
+    text = [
+      `*Urgency decreased to ${urgencyLabel}* ${emoji}`,
+      "",
+      `*Guest:* ${params.guestName}`,
+      `Situation appears to be improving.`,
+    ].join("\n");
+  }
+
+  const channel = unhappyChannelForCountry(params.country);
+  await postToSlack(channel, text, params.threadTs);
+}
+
+async function postToSlack(
+  channel: string,
+  text: string,
+  threadTs?: string
+): Promise<string | undefined> {
+  const body: Record<string, string> = { channel, text };
+  if (threadTs) body.thread_ts = threadTs;
+
   const response = await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${config.slackBotToken}`,
     },
-    body: JSON.stringify({ channel, text }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Slack API failed (${response.status}): ${body}`);
+    const responseBody = await response.text();
+    throw new Error(`Slack API failed (${response.status}): ${responseBody}`);
   }
 
-  const data = (await response.json()) as { ok: boolean; error?: string };
+  const data = (await response.json()) as { ok: boolean; error?: string; ts?: string };
   if (!data.ok) {
     throw new Error(`Slack returned error: ${data.error}`);
   }
 
-  log.info(`Alert sent to ${channel}`);
+  log.info(`Alert sent to ${channel}${threadTs ? " (thread)" : ""}`);
+  return data.ts;
 }

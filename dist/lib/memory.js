@@ -33,8 +33,12 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.URGENCY_RANK = void 0;
 exports.getPastOpportunities = getPastOpportunities;
 exports.recordOpportunity = recordOpportunity;
+exports.getLastUnhappyUrgency = getLastUnhappyUrgency;
+exports.getUnhappyThreadTs = getUnhappyThreadTs;
+exports.recordUnhappyAlert = recordUnhappyAlert;
 const logger_js_1 = require("./logger.js");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -75,4 +79,30 @@ function recordOpportunity(reservationId, why) {
     store[reservationId].sentOpportunities.push(why);
     saveStore(store);
     log.info(`Recorded opportunity for reservation ${reservationId}`);
+}
+exports.URGENCY_RANK = {
+    resolved: -1,
+    low: 0,
+    medium: 1,
+    high: 2,
+};
+function getLastUnhappyUrgency(reservationId) {
+    const store = loadStore();
+    return store[reservationId]?.lastUnhappyUrgency;
+}
+function getUnhappyThreadTs(reservationId) {
+    const store = loadStore();
+    return store[reservationId]?.unhappySlackTs;
+}
+function recordUnhappyAlert(reservationId, urgency, slackTs) {
+    const store = loadStore();
+    if (!store[reservationId]) {
+        store[reservationId] = { sentOpportunities: [] };
+    }
+    store[reservationId].lastUnhappyUrgency = urgency;
+    if (slackTs) {
+        store[reservationId].unhappySlackTs = slackTs;
+    }
+    saveStore(store);
+    log.info(`Recorded unhappy alert for reservation ${reservationId} (urgency: ${urgency})`);
 }
