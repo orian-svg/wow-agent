@@ -101,12 +101,13 @@ export async function getListing(listingId: string): Promise<GuestyListing | nul
     const data = (await guestyGet(`/v1/listings/${listingId}`)) as {
       _id: string;
       title?: string;
+      nickname?: string;
       address?: { country?: string; city?: string };
     };
 
     const listing: GuestyListing = {
       id: data._id,
-      title: data.title ?? "Unknown",
+      title: data.nickname ?? data.title ?? "Unknown",
       country: data.address?.country ?? "",
       city: data.address?.city ?? "",
     };
@@ -137,6 +138,7 @@ export async function getReservation(
       checkOut?: string;
       source?: string;
       status?: string;
+      money?: { fareAccommodation?: number };
       isReturningGuest?: boolean;
       guest?: {
         _id?: string;
@@ -162,10 +164,11 @@ export async function getReservation(
       status: data.status ?? "unknown",
       isReturningGuest: data.isReturningGuest ?? false,
       guestName,
+      totalPrice: data.money?.fareAccommodation ?? 0,
     };
 
     RESERVATION_CACHE.set(reservationId, reservation);
-    log.info(`Reservation ${reservationId} loaded (status: ${reservation.status}, returning: ${reservation.isReturningGuest}, guestId: ${reservation.guestId})`);
+    log.info(`Reservation ${reservationId} loaded (status: ${reservation.status}, returning: ${reservation.isReturningGuest}, guestId: ${reservation.guestId}, total: ${reservation.totalPrice})`);
     return reservation;
   } catch (err) {
     log.error(`Failed to load reservation ${reservationId}`, { error: String(err) });
@@ -193,7 +196,6 @@ export async function getConversation(conversationId: string): Promise<string> {
   }
 }
 
-// שולף את כל השיחות ההיסטוריות של אורח לפי מזהה האורח
 export async function getGuestHistory(guestId: string): Promise<string> {
   if (!guestId) return "";
 

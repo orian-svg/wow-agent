@@ -83,7 +83,7 @@ async function handleAnalysis({
   reservationId: string;
   guestMessages: string;
   messageCount: number;
-  reservation: { guestId: string; guestName: string; checkIn: string; checkOut: string; source: string; status: string; isReturningGuest: boolean };
+  reservation: { guestId: string; guestName: string; checkIn: string; checkOut: string; source: string; status: string; isReturningGuest: boolean; totalPrice: number };
   listing: { country: string; title: string } | null;
   status: string;
   runSentiment: boolean;
@@ -126,7 +126,7 @@ async function handleAnalysis({
 
   if (runSentiment) {
     promises.push(
-      analyzeSentiment(reservation.guestName, guestMessages, messageCount).then(async (sentiment) => {
+      analyzeSentiment(reservation.guestName, guestMessages, messageCount, reservation.checkIn, reservation.totalPrice).then(async (sentiment) => {
         log.info("Sentiment analysis result", { isUnhappy: sentiment.isUnhappy, urgency: sentiment.urgency });
 
         const lastUrgency = getLastUnhappyUrgency(reservationId);

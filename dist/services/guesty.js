@@ -90,7 +90,7 @@ async function getListing(listingId) {
         const data = (await guestyGet(`/v1/listings/${listingId}`));
         const listing = {
             id: data._id,
-            title: data.title ?? "Unknown",
+            title: data.nickname ?? data.title ?? "Unknown",
             country: data.address?.country ?? "",
             city: data.address?.city ?? "",
         };
@@ -126,9 +126,10 @@ async function getReservation(reservationId) {
             status: data.status ?? "unknown",
             isReturningGuest: data.isReturningGuest ?? false,
             guestName,
+            totalPrice: data.money?.fareAccommodation ?? 0,
         };
         RESERVATION_CACHE.set(reservationId, reservation);
-        log.info(`Reservation ${reservationId} loaded (status: ${reservation.status}, returning: ${reservation.isReturningGuest}, guestId: ${reservation.guestId})`);
+        log.info(`Reservation ${reservationId} loaded (status: ${reservation.status}, returning: ${reservation.isReturningGuest}, guestId: ${reservation.guestId}, total: ${reservation.totalPrice})`);
         return reservation;
     }
     catch (err) {
@@ -152,7 +153,6 @@ async function getConversation(conversationId) {
         return "";
     }
 }
-// שולף את כל השיחות ההיסטוריות של אורח לפי מזהה האורח
 async function getGuestHistory(guestId) {
     if (!guestId)
         return "";

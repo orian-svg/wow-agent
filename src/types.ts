@@ -15,6 +15,7 @@ export interface GuestyReservation {
   guestName: string;
   status: string;
   isReturningGuest: boolean;
+  totalPrice: number;
 }
 
 export interface GuestyMessage {

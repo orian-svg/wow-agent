@@ -17,10 +17,13 @@ TWO LEVELS TO DETECT:
 - Direct complaint: guest explicitly states something is wrong, broken, missing, or not as expected.
 - Hidden frustration: cold or clipped tone, short replies after previously warm messages, questions that imply unmet expectations (e.g. "are there supposed to be towels?").
 
-URGENCY LEVELS:
-- high: active problem affecting the stay right now (broken AC, no hot water, safety issue, no response to previous message).
-- medium: disappointment or unmet expectation that hasn't escalated yet.
-- low: mild friction, slight tone shift, subtle dissatisfaction.
+URGENCY LEVELS — read carefully:
+- high: ONLY when the guest is currently checked in AND has an active problem affecting their stay right now (broken AC, no hot water, safety issue, no response to previous message). Also high if the reservation total exceeds $18,000 USD equivalent and there is any sign of risk to the booking — in this case, add "(High-value reservation)" to the issue field.
+- medium: guest is checked in and disappointed or has an unmet expectation, but it is not an emergency. OR guest is not yet checked in but there is a clear issue that needs attention before arrival.
+- low: mild friction, slight tone shift, subtle dissatisfaction. Guest not yet checked in with a minor issue.
+
+CRITICAL URGENCY RULE:
+If the guest has NOT yet checked in, the maximum urgency is MEDIUM — never high — unless the reservation total exceeds $18,000 USD equivalent AND there is a genuine risk of cancellation or serious dissatisfaction.
 
 STRICT RULES:
 1. Only flag if there is a clear or reasonably implied sign of unhappiness. Do not over-detect.
@@ -37,13 +40,21 @@ URGENCY: high/medium/low
 TONE: [brief description of guest tone]
 ISSUE: [one sentence describing the problem]
 SUGGESTION: [one concrete action for the host]`;
-async function analyzeSentiment(guestName, guestMessages, messageCount) {
-    const userContent = `Guest: ${guestName}\nTotal messages in conversation: ${messageCount}\n\nGuest messages:\n${guestMessages}`;
+async function analyzeSentiment(guestName, guestMessages, messageCount, checkIn, totalPrice) {
+    const now = new Date();
+    const checkInDate = checkIn ? new Date(checkIn) : null;
+    const isCheckedIn = checkInDate ? checkInDate <= now : false;
+    const isHighValue = (totalPrice ?? 0) >= 18000;
+    let context = `Guest: ${guestName}\nTotal messages in conversation: ${messageCount}\n`;
+    context += `Guest check-in status: ${isCheckedIn ? "Currently checked in" : "Not yet checked in"}\n`;
+    if (isHighValue)
+        context += `Reservation value: High-value (exceeds $18,000)\n`;
+    context += `\nGuest messages:\n${guestMessages}`;
     const response = await client.messages.create({
         model: "claude-opus-4-5",
         max_tokens: 300,
         system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: userContent }],
+        messages: [{ role: "user", content: context }],
     });
     const first = response.content[0];
     const text = first && first.type === "text" ? first.text : "";

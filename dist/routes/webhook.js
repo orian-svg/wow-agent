@@ -85,7 +85,7 @@ async function handleAnalysis({ reservationId, guestMessages, messageCount, rese
         (0, memory_js_1.recordOpportunity)(reservationId, analysis.why);
     }));
     if (runSentiment) {
-        promises.push((0, sentiment_js_1.analyzeSentiment)(reservation.guestName, guestMessages, messageCount).then(async (sentiment) => {
+        promises.push((0, sentiment_js_1.analyzeSentiment)(reservation.guestName, guestMessages, messageCount, reservation.checkIn, reservation.totalPrice).then(async (sentiment) => {
             log.info("Sentiment analysis result", { isUnhappy: sentiment.isUnhappy, urgency: sentiment.urgency });
             const lastUrgency = (0, memory_js_1.getLastUnhappyUrgency)(reservationId);
             const threadTs = (0, memory_js_1.getUnhappyThreadTs)(reservationId);
