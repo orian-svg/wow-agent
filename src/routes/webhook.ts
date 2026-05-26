@@ -138,18 +138,23 @@ async function handleAnalysis({
         if (!sentiment.isUnhappy && lastUrgency === undefined) return;
 
         if (sentiment.isUnhappy && (lastRank === undefined || newRank > lastRank)) {
-          const ts = await sendUnhappyAlert({
-            country: listing?.country ?? "",
-            guestName: reservation.guestName,
-            listingTitle: listing?.title ?? "Unknown",
-            checkIn: reservation.checkIn,
-            checkOut: reservation.checkOut,
-            source: reservation.source,
-            messageCount,
-            sentiment,
-            threadTs,
-          });
-          recordUnhappyAlert(reservationId, newUrgency, threadTs ? undefined : ts);
+          if (sentiment.urgency === "high") {
+            const ts = await sendUnhappyAlert({
+              country: listing?.country ?? "",
+              guestName: reservation.guestName,
+              listingTitle: listing?.title ?? "Unknown",
+              checkIn: reservation.checkIn,
+              checkOut: reservation.checkOut,
+              source: reservation.source,
+              messageCount,
+              sentiment,
+              threadTs,
+            });
+            recordUnhappyAlert(reservationId, newUrgency, threadTs ? undefined : ts);
+          } else {
+            recordUnhappyAlert(reservationId, newUrgency);
+            log.info(`Urgency ${sentiment.urgency} — saved for daily report, no real-time alert`);
+          }
           return;
         }
 
@@ -261,4 +266,4 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
   } catch (err) {
     log.error("Webhook handler error", { error: String(err) });
   }
-}
+

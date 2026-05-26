@@ -95,18 +95,24 @@ async function handleAnalysis({ reservationId, guestMessages, messageCount, rese
             if (!sentiment.isUnhappy && lastUrgency === undefined)
                 return;
             if (sentiment.isUnhappy && (lastRank === undefined || newRank > lastRank)) {
-                const ts = await (0, slack_js_1.sendUnhappyAlert)({
-                    country: listing?.country ?? "",
-                    guestName: reservation.guestName,
-                    listingTitle: listing?.title ?? "Unknown",
-                    checkIn: reservation.checkIn,
-                    checkOut: reservation.checkOut,
-                    source: reservation.source,
-                    messageCount,
-                    sentiment,
-                    threadTs,
-                });
-                (0, memory_js_1.recordUnhappyAlert)(reservationId, newUrgency, threadTs ? undefined : ts);
+                if (sentiment.urgency === "high") {
+                    const ts = await (0, slack_js_1.sendUnhappyAlert)({
+                        country: listing?.country ?? "",
+                        guestName: reservation.guestName,
+                        listingTitle: listing?.title ?? "Unknown",
+                        checkIn: reservation.checkIn,
+                        checkOut: reservation.checkOut,
+                        source: reservation.source,
+                        messageCount,
+                        sentiment,
+                        threadTs,
+                    });
+                    (0, memory_js_1.recordUnhappyAlert)(reservationId, newUrgency, threadTs ? undefined : ts);
+                }
+                else {
+                    (0, memory_js_1.recordUnhappyAlert)(reservationId, newUrgency);
+                    log.info(`Urgency ${sentiment.urgency} — saved for daily report, no real-time alert`);
+                }
                 return;
             }
             if (lastUrgency !== undefined && newRank < lastRank && threadTs) {
