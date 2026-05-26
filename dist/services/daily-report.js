@@ -141,12 +141,12 @@ async function sendDailyReport(reportType) {
         const athensTotal = reservations.filter((r) => r.country.toLowerCase() === "greece" || r.country.toLowerCase() === "gr").length;
         if (israelCases.length > 0 || reportType === "evening") {
             const israelText = buildReportText("Israel", israelCases, israelTotal, reportType, dateStr);
-            await postToSlack(config_js_1.config.slackChannelIsrael, israelText);
+            await postToSlack(config_js_1.config.slackChannelUnhappyIsrael, israelText);
             log.info(`Israel report sent (${israelCases.length} cases)`);
         }
         if (athensCases.length > 0 || reportType === "evening") {
             const athensText = buildReportText("Athens", athensCases, athensTotal, reportType, dateStr);
-            await postToSlack(config_js_1.config.slackChannelAthens, athensText);
+            await postToSlack(config_js_1.config.slackChannelUnhappyAthens, athensText);
             log.info(`Athens report sent (${athensCases.length} cases)`);
         }
     }

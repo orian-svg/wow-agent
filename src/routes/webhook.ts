@@ -90,7 +90,6 @@ async function handleAnalysis({
 }): Promise<void> {
   const pastOpportunities = getPastOpportunities(reservationId);
 
-  // שליפת היסטוריה רק אם יש מזהה אורח
   let guestHistory = "";
   if (reservation.guestId) {
     guestHistory = await getGuestHistory(reservation.guestId);
@@ -266,4 +265,4 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
   } catch (err) {
     log.error("Webhook handler error", { error: String(err) });
   }
-
+}

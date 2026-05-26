@@ -56,7 +56,6 @@ function wasJustConfirmed(event) {
 }
 async function handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment, }) {
     const pastOpportunities = (0, memory_js_1.getPastOpportunities)(reservationId);
-    // שליפת היסטוריה רק אם יש מזהה אורח
     let guestHistory = "";
     if (reservation.guestId) {
         guestHistory = await (0, guesty_js_1.getGuestHistory)(reservation.guestId);

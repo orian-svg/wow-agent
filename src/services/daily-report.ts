@@ -190,13 +190,13 @@ export async function sendDailyReport(reportType: "evening" | "morning"): Promis
 
     if (israelCases.length > 0 || reportType === "evening") {
       const israelText = buildReportText("Israel", israelCases, israelTotal, reportType, dateStr);
-      await postToSlack(config.slackChannelIsrael, israelText);
+      await postToSlack(config.slackChannelUnhappyIsrael, israelText);
       log.info(`Israel report sent (${israelCases.length} cases)`);
     }
 
     if (athensCases.length > 0 || reportType === "evening") {
       const athensText = buildReportText("Athens", athensCases, athensTotal, reportType, dateStr);
-      await postToSlack(config.slackChannelAthens, athensText);
+      await postToSlack(config.slackChannelUnhappyAthens, athensText);
       log.info(`Athens report sent (${athensCases.length} cases)`);
     }
 
