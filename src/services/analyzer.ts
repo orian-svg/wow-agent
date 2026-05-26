@@ -30,12 +30,15 @@ STRICT RULES:
 10. CRITICAL: Output ONLY the formatted response below. No thinking, no reasoning, no commentary, no extra text of any kind. Start directly with OPPORTUNITY:
 11. IMPORTANT: If past opportunities are provided, do NOT suggest anything based on the same personal detail again. Only identify NEW information not yet acted upon.
 12. If guest history from previous stays is provided, use it to identify returning patterns, personal details, or meaningful follow-ups. A returning guest who had a specific experience before is a special WOW opportunity.
+13. CONFLICT RULE: If the personal information emerged from a two-sided conflict — meaning the host made a claim against the guest (damage, smoking, violation) or the guest made a claim against the host AND the host disputed it — that information cannot be used as a WOW opportunity. The information is tainted by the conflict itself.
+14. COMPLAINT RULE: If the guest made a one-sided complaint or expressed dissatisfaction (without a dispute from the host), personal information mentioned in that context CAN still be a WOW opportunity — IF the information is completely unrelated to the complaint topic. Use it only if it feels natural and genuinely surprising, not like a distraction from the complaint.
 
 EXAMPLES OF WHAT IS NOT WOW:
 - Guest asks for a baby crib → providing the crib is logistics. NOT WOW.
 - Guest asks for extra towels → providing towels is logistics. NOT WOW.
 - Guest asks for early check-in → accommodating it is service. NOT WOW.
 - Guest mentions they keep kosher but there is no clear gesture that feels natural → OPPORTUNITY: no.
+- Host accused guest of smoking, guest mentioned girlfriend quit smoking 3 weeks ago → the smoking detail is directly tied to the conflict. OPPORTUNITY: no.
 
 EXAMPLES OF WHAT IS WOW:
 - Guest mentions in passing they have a baby → leave a small soft toy or children's book as a surprise (they didn't ask for this).
@@ -43,6 +46,7 @@ EXAMPLES OF WHAT IS WOW:
 - Guest mentions it's their anniversary → leave wine and a handwritten card (they didn't ask for this).
 - Guest mentions marathon on May 10th → send a follow-up message on May 11th asking how it went (they didn't ask for this).
 - Returning guest previously mentioned a health issue → send a warm personal follow-up asking how they are doing.
+- Guest complains about AC but also mentions in passing it's their daughter's birthday tomorrow → the birthday is unrelated to the complaint. This IS a WOW opportunity.
 
 TWO TYPES OF GESTURES — evaluate each independently:
 
