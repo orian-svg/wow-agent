@@ -1,5 +1,5 @@
 import { createLogger } from "../lib/logger.js";
-import { getListing, getReservation } from "./guesty.js";
+import { getListing } from "./guesty.js";
 import { analyzeGuestCase } from "./report.js";
 import type { GuestCaseStatus } from "./report.js";
 import { config } from "../config.js";
@@ -73,6 +73,22 @@ async function postToSlack(channel: string, text: string): Promise<void> {
   if (!data.ok) throw new Error(`Slack error: ${data.error}`);
 }
 
+async function getGuestyToken(): Promise<string> {
+  const response = await fetch("https://open-api.guesty.com/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+      scope: "open-api",
+      client_id: config.guestyClientId,
+      client_secret: config.guestyClientSecret,
+    }),
+  });
+  const data = (await response.json()) as { access_token?: string };
+  if (!data.access_token) throw new Error("Failed to get Guesty token");
+  return data.access_token;
+}
+
 async function fetchActiveReservations(): Promise<Array<{
   reservationId: string;
   guestName: string;
@@ -80,7 +96,6 @@ async function fetchActiveReservations(): Promise<Array<{
   country: string;
   messages: string;
 }>> {
-  // שולף הזמנות פעילות מגסטי לפי תאריך
   const token = await getGuestyToken();
   const today = new Date().toISOString().split("T")[0];
 
@@ -102,9 +117,12 @@ async function fetchActiveReservations(): Promise<Array<{
     }>;
   };
 
+  const rawResults = data.results ?? [];
+  log.info(`Fetched ${rawResults.length} active reservations from Guesty`);
+
   const results = [];
 
-  for (const res of data.results ?? []) {
+  for (const res of rawResults) {
     try {
       const listing = res.listingId ? await getListing(res.listingId) : null;
       const country = listing?.country ?? "";
@@ -115,18 +133,21 @@ async function fetchActiveReservations(): Promise<Array<{
       const combinedName = `${firstName} ${lastName}`.trim();
       const fullName = (res.guest?.fullName || combinedName) || "Guest";
 
-      // שלוף שיחות
       const convResponse = await fetch(
         `https://open-api.guesty.com/v1/communication/conversations?reservationId=${res._id}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      if (!convResponse.ok) continue;
+      if (!convResponse.ok) {
+        log.warn(`Failed to fetch conversations for reservation ${res._id}`);
+        continue;
+      }
 
       const convData = (await convResponse.json()) as {
         results?: Array<{ thread?: Array<{ type: string; body?: string }> }>;
       };
 
+      const convCount = convData.results?.length ?? 0;
       const messages = (convData.results ?? [])
         .flatMap((c) => c.thread ?? [])
         .filter((m) => m.type === "fromGuest" || m.type === "fromHost")
@@ -134,7 +155,12 @@ async function fetchActiveReservations(): Promise<Array<{
         .filter((b) => b.trim().length > 0)
         .join("\n");
 
-      if (!messages) continue;
+      log.info(`Reservation ${res._id} (${fullName} — ${nickname}): ${convCount} conversations, ${messages.length} chars of messages`);
+
+      if (!messages) {
+        log.info(`Skipping ${fullName} — no messages found`);
+        continue;
+      }
 
       results.push({ reservationId: res._id, guestName: fullName, listingNickname: nickname, country, messages });
     } catch (err) {
@@ -142,23 +168,8 @@ async function fetchActiveReservations(): Promise<Array<{
     }
   }
 
+  log.info(`${results.length} reservations with messages ready for analysis`);
   return results;
-}
-
-async function getGuestyToken(): Promise<string> {
-  const response = await fetch("https://open-api.guesty.com/oauth2/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "client_credentials",
-      scope: "open-api",
-      client_id: config.guestyClientId,
-      client_secret: config.guestyClientSecret,
-    }),
-  });
-  const data = (await response.json()) as { access_token?: string };
-  if (!data.access_token) throw new Error("Failed to get Guesty token");
-  return data.access_token;
 }
 
 export async function sendDailyReport(reportType: "evening" | "morning"): Promise<void> {
@@ -168,13 +179,13 @@ export async function sendDailyReport(reportType: "evening" | "morning"): Promis
 
   try {
     const reservations = await fetchActiveReservations();
-    const totalStays = reservations.length;
 
     const israelCases: GuestCaseStatus[] = [];
     const athensCases: GuestCaseStatus[] = [];
 
     for (const res of reservations) {
       const caseResult = await analyzeGuestCase(res.guestName, res.listingNickname, res.messages);
+      log.info(`Analysis for ${res.guestName}: ${caseResult ? caseResult.status : "none"}`);
       if (!caseResult) continue;
 
       const isGreece = res.country.toLowerCase() === "greece" || res.country.toLowerCase() === "gr";
