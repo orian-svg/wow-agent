@@ -18,7 +18,6 @@ import type { GuestyMessage, WebhookContext } from "../types.js";
 
 const log = createLogger("webhook");
 
-// ערוצים שבהם inquiry/reserved אינם הזמנה רשמית
 const INQUIRY_SOURCES = ["airbnb", "airbnb2", "vrbo"];
 
 function formatStatus(status: string, isReturningGuest: boolean): string {
@@ -42,20 +41,13 @@ function isInquirySource(source: string): boolean {
   return INQUIRY_SOURCES.includes(source.toLowerCase());
 }
 
-// האם לנתח WOW על הודעה שוטפת
 function shouldRunWow(reservation: {
   status: string;
   source: string;
   isReturningGuest: boolean;
 }): boolean {
-  // אורח חוזר — תמיד WOW
   if (reservation.isReturningGuest) return true;
-
-  // inquiry/reserved מ-Airbnb או VRBO — ללא WOW
-  if (isInquiryStatus(reservation.status) && isInquirySource(reservation.source)) {
-    return false;
-  }
-
+  if (isInquiryStatus(reservation.status) && isInquirySource(reservation.source)) return false;
   return true;
 }
 
@@ -119,9 +111,9 @@ async function handleAnalysis({
   runSentiment: boolean;
   runWow: boolean;
 }): Promise<void> {
-  // שמור שיחה בזיכרון לדוח היומי
+  // שמור שיחה ב-Redis
   if (guestMessages) {
-    saveConversation(reservationId, guestMessages, {
+    await saveConversation(reservationId, guestMessages, {
       guestName: reservation.guestName,
       listingNickname: listing?.title ?? "Unknown",
       country: listing?.country ?? "",
@@ -132,7 +124,7 @@ async function handleAnalysis({
     log.info(`Conversation saved for ${reservation.guestName} (${reservationId})`);
   }
 
-  const pastOpportunities = getPastOpportunities(reservationId);
+  const pastOpportunities = await getPastOpportunities(reservationId);
 
   let guestHistory = "";
   if (reservation.guestId) {
@@ -164,7 +156,7 @@ async function handleAnalysis({
         });
 
         await sendAlert(alertParams);
-        recordOpportunity(reservationId, analysis.why);
+        await recordOpportunity(reservationId, analysis.why);
       })
     );
   } else {
@@ -176,8 +168,8 @@ async function handleAnalysis({
       analyzeSentiment(reservation.guestName, guestMessages, messageCount, reservation.checkIn, reservation.totalPrice).then(async (sentiment) => {
         log.info("Sentiment analysis result", { isUnhappy: sentiment.isUnhappy, urgency: sentiment.urgency });
 
-        const lastUrgency = getLastUnhappyUrgency(reservationId);
-        const threadTs = getUnhappyThreadTs(reservationId);
+        const lastUrgency = await getLastUnhappyUrgency(reservationId);
+        const threadTs = await getUnhappyThreadTs(reservationId);
         const newUrgency: Urgency = sentiment.isUnhappy ? sentiment.urgency : "resolved";
         const newRank = URGENCY_RANK[newUrgency];
         const lastRank = lastUrgency !== undefined ? URGENCY_RANK[lastUrgency] : undefined;
@@ -197,9 +189,9 @@ async function handleAnalysis({
               sentiment,
               threadTs,
             });
-            recordUnhappyAlert(reservationId, newUrgency, threadTs ? undefined : ts);
+            await recordUnhappyAlert(reservationId, newUrgency, threadTs ? undefined : ts);
           } else {
-            recordUnhappyAlert(reservationId, newUrgency);
+            await recordUnhappyAlert(reservationId, newUrgency);
             log.info(`Urgency ${sentiment.urgency} — saved for daily report, no real-time alert`);
           }
           return;
@@ -213,7 +205,7 @@ async function handleAnalysis({
             newUrgency: sentiment.isUnhappy ? sentiment.urgency : undefined,
             threadTs,
           });
-          recordUnhappyAlert(reservationId, newUrgency);
+          await recordUnhappyAlert(reservationId, newUrgency);
         }
       })
     );
@@ -274,7 +266,6 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
         status,
       });
 
-      // בעת אישור — תמיד WOW, ללא סנטימנט
       await handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment: false, runWow: true });
       return;
     }

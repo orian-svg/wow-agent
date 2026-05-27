@@ -1,37 +1,4 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.URGENCY_RANK = void 0;
 exports.getPastOpportunities = getPastOpportunities;
@@ -42,44 +9,39 @@ exports.recordUnhappyAlert = recordUnhappyAlert;
 exports.saveConversation = saveConversation;
 exports.getAllActiveConversations = getAllActiveConversations;
 const logger_js_1 = require("./logger.js");
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
+const redis_1 = require("@upstash/redis");
 const log = (0, logger_js_1.createLogger)("memory");
-const MEMORY_FILE = path.resolve("./data/memory.json");
-function loadStore() {
+const redis = new redis_1.Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN,
+});
+async function getRecord(reservationId) {
     try {
-        if (!fs.existsSync(MEMORY_FILE))
-            return {};
-        const raw = fs.readFileSync(MEMORY_FILE, "utf-8");
-        return JSON.parse(raw);
+        const data = await redis.get(`res:${reservationId}`);
+        return data ?? { sentOpportunities: [] };
     }
     catch {
-        log.warn("Could not load memory file, starting fresh");
-        return {};
+        log.warn(`Could not read from Redis for ${reservationId}`);
+        return { sentOpportunities: [] };
     }
 }
-function saveStore(store) {
+async function setRecord(reservationId, data) {
     try {
-        const dir = path.dirname(MEMORY_FILE);
-        if (!fs.existsSync(dir))
-            fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(MEMORY_FILE, JSON.stringify(store, null, 2), "utf-8");
+        // שמירה ל-30 יום
+        await redis.set(`res:${reservationId}`, data, { ex: 60 * 60 * 24 * 30 });
     }
     catch (err) {
-        log.error("Could not save memory file", { error: String(err) });
+        log.error(`Could not write to Redis for ${reservationId}`, { error: String(err) });
     }
 }
-function getPastOpportunities(reservationId) {
-    const store = loadStore();
-    return store[reservationId]?.sentOpportunities ?? [];
+async function getPastOpportunities(reservationId) {
+    const data = await getRecord(reservationId);
+    return data.sentOpportunities ?? [];
 }
-function recordOpportunity(reservationId, why) {
-    const store = loadStore();
-    if (!store[reservationId]) {
-        store[reservationId] = { sentOpportunities: [] };
-    }
-    store[reservationId].sentOpportunities.push(why);
-    saveStore(store);
+async function recordOpportunity(reservationId, why) {
+    const data = await getRecord(reservationId);
+    data.sentOpportunities = [...(data.sentOpportunities ?? []), why];
+    await setRecord(reservationId, data);
     log.info(`Recorded opportunity for reservation ${reservationId}`);
 }
 exports.URGENCY_RANK = {
@@ -88,68 +50,67 @@ exports.URGENCY_RANK = {
     medium: 1,
     high: 2,
 };
-function getLastUnhappyUrgency(reservationId) {
-    const store = loadStore();
-    return store[reservationId]?.lastUnhappyUrgency;
+async function getLastUnhappyUrgency(reservationId) {
+    const data = await getRecord(reservationId);
+    return data.lastUnhappyUrgency;
 }
-function getUnhappyThreadTs(reservationId) {
-    const store = loadStore();
-    return store[reservationId]?.unhappySlackTs;
+async function getUnhappyThreadTs(reservationId) {
+    const data = await getRecord(reservationId);
+    return data.unhappySlackTs;
 }
-function recordUnhappyAlert(reservationId, urgency, slackTs) {
-    const store = loadStore();
-    if (!store[reservationId]) {
-        store[reservationId] = { sentOpportunities: [] };
-    }
-    store[reservationId].lastUnhappyUrgency = urgency;
-    if (slackTs) {
-        store[reservationId].unhappySlackTs = slackTs;
-    }
-    saveStore(store);
+async function recordUnhappyAlert(reservationId, urgency, slackTs) {
+    const data = await getRecord(reservationId);
+    data.lastUnhappyUrgency = urgency;
+    if (slackTs)
+        data.unhappySlackTs = slackTs;
+    await setRecord(reservationId, data);
     log.info(`Recorded unhappy alert for reservation ${reservationId} (urgency: ${urgency})`);
 }
-// שמירת השיחה המצטברת לדוח היומי
-function saveConversation(reservationId, messages, meta) {
-    const store = loadStore();
-    if (!store[reservationId]) {
-        store[reservationId] = { sentOpportunities: [] };
-    }
-    store[reservationId].conversationMessages = messages;
-    store[reservationId].guestName = meta.guestName;
-    store[reservationId].listingNickname = meta.listingNickname;
-    store[reservationId].country = meta.country;
-    store[reservationId].checkIn = meta.checkIn;
-    store[reservationId].checkOut = meta.checkOut;
-    store[reservationId].source = meta.source;
-    store[reservationId].lastUpdated = new Date().toISOString();
-    saveStore(store);
+async function saveConversation(reservationId, messages, meta) {
+    const data = await getRecord(reservationId);
+    data.conversationMessages = messages;
+    data.guestName = meta.guestName;
+    data.listingNickname = meta.listingNickname;
+    data.country = meta.country;
+    data.checkIn = meta.checkIn;
+    data.checkOut = meta.checkOut;
+    data.source = meta.source;
+    data.lastUpdated = new Date().toISOString();
+    await setRecord(reservationId, data);
 }
-// שליפת כל ההזמנות שיש להן שיחה שמורה
-function getAllActiveConversations() {
-    const store = loadStore();
-    const results = [];
-    for (const [reservationId, data] of Object.entries(store)) {
-        if (!data.conversationMessages || !data.guestName)
-            continue;
-        // מסנן הזמנות ישנות שהצ'ק-אאוט שלהן עבר יותר מ-2 ימים
-        if (data.checkOut) {
-            const checkOut = new Date(data.checkOut);
-            const twoDaysAgo = new Date();
-            twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-            if (checkOut < twoDaysAgo)
+async function getAllActiveConversations() {
+    try {
+        const keys = await redis.keys("res:*");
+        const results = [];
+        for (const key of keys) {
+            const data = await redis.get(key);
+            if (!data?.conversationMessages || !data?.guestName)
                 continue;
+            // מסנן הזמנות שהצ'ק-אאוט עבר יותר מ-2 ימים
+            if (data.checkOut) {
+                const checkOut = new Date(data.checkOut);
+                const twoDaysAgo = new Date();
+                twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+                if (checkOut < twoDaysAgo)
+                    continue;
+            }
+            const reservationId = key.replace("res:", "");
+            results.push({
+                reservationId,
+                messages: data.conversationMessages,
+                guestName: data.guestName,
+                listingNickname: data.listingNickname ?? "Unknown",
+                country: data.country ?? "",
+                checkIn: data.checkIn ?? "",
+                checkOut: data.checkOut ?? "",
+                source: data.source ?? "",
+                lastUpdated: data.lastUpdated ?? "",
+            });
         }
-        results.push({
-            reservationId,
-            messages: data.conversationMessages,
-            guestName: data.guestName,
-            listingNickname: data.listingNickname ?? "Unknown",
-            country: data.country ?? "",
-            checkIn: data.checkIn ?? "",
-            checkOut: data.checkOut ?? "",
-            source: data.source ?? "",
-            lastUpdated: data.lastUpdated ?? "",
-        });
+        return results;
     }
-    return results;
+    catch (err) {
+        log.error("Failed to get active conversations from Redis", { error: String(err) });
+        return [];
+    }
 }

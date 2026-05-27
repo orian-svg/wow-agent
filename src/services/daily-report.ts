@@ -79,8 +79,8 @@ export async function sendDailyReport(reportType: "evening" | "morning"): Promis
   const dateStr = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 
   try {
-    const conversations = getAllActiveConversations();
-    log.info(`Found ${conversations.length} active conversations in memory`);
+    const conversations = await getAllActiveConversations();
+    log.info(`Found ${conversations.length} active conversations in Redis`);
 
     const israelCases: GuestCaseStatus[] = [];
     const athensCases: GuestCaseStatus[] = [];

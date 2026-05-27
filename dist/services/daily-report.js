@@ -64,8 +64,8 @@ async function sendDailyReport(reportType) {
     log.info(`Sending ${reportType} report`);
     const dateStr = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
     try {
-        const conversations = (0, memory_js_1.getAllActiveConversations)();
-        log.info(`Found ${conversations.length} active conversations in memory`);
+        const conversations = await (0, memory_js_1.getAllActiveConversations)();
+        log.info(`Found ${conversations.length} active conversations in Redis`);
         const israelCases = [];
         const athensCases = [];
         let israelTotal = 0;

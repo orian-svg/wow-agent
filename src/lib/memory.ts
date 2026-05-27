@@ -1,10 +1,12 @@
 import { createLogger } from "./logger.js";
-import * as fs from "fs";
-import * as path from "path";
+import { Redis } from "@upstash/redis";
 
 const log = createLogger("memory");
 
-const MEMORY_FILE = path.resolve("./data/memory.json");
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL!,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+});
 
 export type Urgency = "low" | "medium" | "high" | "resolved";
 
@@ -12,7 +14,7 @@ interface ReservationMemory {
   sentOpportunities: string[];
   lastUnhappyUrgency?: Urgency;
   unhappySlackTs?: string;
-  conversationMessages?: string; // שיחה מצטברת לדוח
+  conversationMessages?: string;
   guestName?: string;
   listingNickname?: string;
   country?: string;
@@ -22,41 +24,34 @@ interface ReservationMemory {
   lastUpdated?: string;
 }
 
-type MemoryStore = Record<string, ReservationMemory>;
-
-function loadStore(): MemoryStore {
+async function getRecord(reservationId: string): Promise<ReservationMemory> {
   try {
-    if (!fs.existsSync(MEMORY_FILE)) return {};
-    const raw = fs.readFileSync(MEMORY_FILE, "utf-8");
-    return JSON.parse(raw) as MemoryStore;
+    const data = await redis.get<ReservationMemory>(`res:${reservationId}`);
+    return data ?? { sentOpportunities: [] };
   } catch {
-    log.warn("Could not load memory file, starting fresh");
-    return {};
+    log.warn(`Could not read from Redis for ${reservationId}`);
+    return { sentOpportunities: [] };
   }
 }
 
-function saveStore(store: MemoryStore): void {
+async function setRecord(reservationId: string, data: ReservationMemory): Promise<void> {
   try {
-    const dir = path.dirname(MEMORY_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(MEMORY_FILE, JSON.stringify(store, null, 2), "utf-8");
+    // שמירה ל-30 יום
+    await redis.set(`res:${reservationId}`, data, { ex: 60 * 60 * 24 * 30 });
   } catch (err) {
-    log.error("Could not save memory file", { error: String(err) });
+    log.error(`Could not write to Redis for ${reservationId}`, { error: String(err) });
   }
 }
 
-export function getPastOpportunities(reservationId: string): string[] {
-  const store = loadStore();
-  return store[reservationId]?.sentOpportunities ?? [];
+export async function getPastOpportunities(reservationId: string): Promise<string[]> {
+  const data = await getRecord(reservationId);
+  return data.sentOpportunities ?? [];
 }
 
-export function recordOpportunity(reservationId: string, why: string): void {
-  const store = loadStore();
-  if (!store[reservationId]) {
-    store[reservationId] = { sentOpportunities: [] };
-  }
-  store[reservationId].sentOpportunities.push(why);
-  saveStore(store);
+export async function recordOpportunity(reservationId: string, why: string): Promise<void> {
+  const data = await getRecord(reservationId);
+  data.sentOpportunities = [...(data.sentOpportunities ?? []), why];
+  await setRecord(reservationId, data);
   log.info(`Recorded opportunity for reservation ${reservationId}`);
 }
 
@@ -67,35 +62,29 @@ export const URGENCY_RANK: Record<Urgency, number> = {
   high: 2,
 };
 
-export function getLastUnhappyUrgency(reservationId: string): Urgency | undefined {
-  const store = loadStore();
-  return store[reservationId]?.lastUnhappyUrgency;
+export async function getLastUnhappyUrgency(reservationId: string): Promise<Urgency | undefined> {
+  const data = await getRecord(reservationId);
+  return data.lastUnhappyUrgency;
 }
 
-export function getUnhappyThreadTs(reservationId: string): string | undefined {
-  const store = loadStore();
-  return store[reservationId]?.unhappySlackTs;
+export async function getUnhappyThreadTs(reservationId: string): Promise<string | undefined> {
+  const data = await getRecord(reservationId);
+  return data.unhappySlackTs;
 }
 
-export function recordUnhappyAlert(
+export async function recordUnhappyAlert(
   reservationId: string,
   urgency: Urgency,
   slackTs?: string
-): void {
-  const store = loadStore();
-  if (!store[reservationId]) {
-    store[reservationId] = { sentOpportunities: [] };
-  }
-  store[reservationId].lastUnhappyUrgency = urgency;
-  if (slackTs) {
-    store[reservationId].unhappySlackTs = slackTs;
-  }
-  saveStore(store);
+): Promise<void> {
+  const data = await getRecord(reservationId);
+  data.lastUnhappyUrgency = urgency;
+  if (slackTs) data.unhappySlackTs = slackTs;
+  await setRecord(reservationId, data);
   log.info(`Recorded unhappy alert for reservation ${reservationId} (urgency: ${urgency})`);
 }
 
-// שמירת השיחה המצטברת לדוח היומי
-export function saveConversation(
+export async function saveConversation(
   reservationId: string,
   messages: string,
   meta: {
@@ -106,24 +95,20 @@ export function saveConversation(
     checkOut: string;
     source: string;
   }
-): void {
-  const store = loadStore();
-  if (!store[reservationId]) {
-    store[reservationId] = { sentOpportunities: [] };
-  }
-  store[reservationId].conversationMessages = messages;
-  store[reservationId].guestName = meta.guestName;
-  store[reservationId].listingNickname = meta.listingNickname;
-  store[reservationId].country = meta.country;
-  store[reservationId].checkIn = meta.checkIn;
-  store[reservationId].checkOut = meta.checkOut;
-  store[reservationId].source = meta.source;
-  store[reservationId].lastUpdated = new Date().toISOString();
-  saveStore(store);
+): Promise<void> {
+  const data = await getRecord(reservationId);
+  data.conversationMessages = messages;
+  data.guestName = meta.guestName;
+  data.listingNickname = meta.listingNickname;
+  data.country = meta.country;
+  data.checkIn = meta.checkIn;
+  data.checkOut = meta.checkOut;
+  data.source = meta.source;
+  data.lastUpdated = new Date().toISOString();
+  await setRecord(reservationId, data);
 }
 
-// שליפת כל ההזמנות שיש להן שיחה שמורה
-export function getAllActiveConversations(): Array<{
+export async function getAllActiveConversations(): Promise<Array<{
   reservationId: string;
   messages: string;
   guestName: string;
@@ -133,33 +118,40 @@ export function getAllActiveConversations(): Array<{
   checkOut: string;
   source: string;
   lastUpdated: string;
-}> {
-  const store = loadStore();
-  const results = [];
+}>> {
+  try {
+    const keys = await redis.keys("res:*");
+    const results = [];
 
-  for (const [reservationId, data] of Object.entries(store)) {
-    if (!data.conversationMessages || !data.guestName) continue;
+    for (const key of keys) {
+      const data = await redis.get<ReservationMemory>(key);
+      if (!data?.conversationMessages || !data?.guestName) continue;
 
-    // מסנן הזמנות ישנות שהצ'ק-אאוט שלהן עבר יותר מ-2 ימים
-    if (data.checkOut) {
-      const checkOut = new Date(data.checkOut);
-      const twoDaysAgo = new Date();
-      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-      if (checkOut < twoDaysAgo) continue;
+      // מסנן הזמנות שהצ'ק-אאוט עבר יותר מ-2 ימים
+      if (data.checkOut) {
+        const checkOut = new Date(data.checkOut);
+        const twoDaysAgo = new Date();
+        twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+        if (checkOut < twoDaysAgo) continue;
+      }
+
+      const reservationId = key.replace("res:", "");
+      results.push({
+        reservationId,
+        messages: data.conversationMessages,
+        guestName: data.guestName,
+        listingNickname: data.listingNickname ?? "Unknown",
+        country: data.country ?? "",
+        checkIn: data.checkIn ?? "",
+        checkOut: data.checkOut ?? "",
+        source: data.source ?? "",
+        lastUpdated: data.lastUpdated ?? "",
+      });
     }
 
-    results.push({
-      reservationId,
-      messages: data.conversationMessages,
-      guestName: data.guestName,
-      listingNickname: data.listingNickname ?? "Unknown",
-      country: data.country ?? "",
-      checkIn: data.checkIn ?? "",
-      checkOut: data.checkOut ?? "",
-      source: data.source ?? "",
-      lastUpdated: data.lastUpdated ?? "",
-    });
+    return results;
+  } catch (err) {
+    log.error("Failed to get active conversations from Redis", { error: String(err) });
+    return [];
   }
-
-  return results;
 }
