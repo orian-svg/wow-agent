@@ -2,8 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendDailyReport = sendDailyReport;
 const logger_js_1 = require("../lib/logger.js");
-const guesty_js_1 = require("./guesty.js");
 const report_js_1 = require("./report.js");
+const memory_js_1 = require("../lib/memory.js");
 const config_js_1 = require("../config.js");
 const log = (0, logger_js_1.createLogger)("daily-report");
 const MENTION = `<@U09C5SWP4BE> <@U086JR2LF6K>`;
@@ -60,83 +60,26 @@ async function postToSlack(channel, text) {
     if (!data.ok)
         throw new Error(`Slack error: ${data.error}`);
 }
-async function getGuestyToken() {
-    const response = await fetch("https://open-api.guesty.com/oauth2/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-            grant_type: "client_credentials",
-            scope: "open-api",
-            client_id: config_js_1.config.guestyClientId,
-            client_secret: config_js_1.config.guestyClientSecret,
-        }),
-    });
-    const data = (await response.json());
-    if (!data.access_token)
-        throw new Error("Failed to get Guesty token");
-    return data.access_token;
-}
-async function fetchActiveReservations() {
-    const token = await getGuestyToken();
-    const today = new Date().toISOString().split("T")[0];
-    const response = await fetch(`https://open-api.guesty.com/v1/reservations?status=confirmed&checkIn[$lte]=${today}&checkOut[$gte]=${today}&limit=100`, { headers: { Authorization: `Bearer ${token}` } });
-    if (!response.ok) {
-        log.error("Failed to fetch active reservations");
-        return [];
-    }
-    const data = (await response.json());
-    const rawResults = data.results ?? [];
-    log.info(`Fetched ${rawResults.length} active reservations from Guesty`);
-    const results = [];
-    for (const res of rawResults) {
-        try {
-            const listing = res.listingId ? await (0, guesty_js_1.getListing)(res.listingId) : null;
-            const country = listing?.country ?? "";
-            const nickname = listing?.title ?? "Unknown";
-            const firstName = res.guest?.firstName ?? "";
-            const lastName = res.guest?.lastName ?? "";
-            const combinedName = `${firstName} ${lastName}`.trim();
-            const fullName = (res.guest?.fullName || combinedName) || "Guest";
-            const convResponse = await fetch(`https://open-api.guesty.com/v1/communication/conversations?reservationId=${res._id}`, { headers: { Authorization: `Bearer ${token}` } });
-            if (!convResponse.ok) {
-                log.warn(`Failed to fetch conversations for reservation ${res._id}`);
-                continue;
-            }
-            const convData = (await convResponse.json());
-            const convCount = convData.results?.length ?? 0;
-            const messages = (convData.results ?? [])
-                .flatMap((c) => c.thread ?? [])
-                .filter((m) => m.type === "fromGuest" || m.type === "fromHost")
-                .map((m) => m.body ?? "")
-                .filter((b) => b.trim().length > 0)
-                .join("\n");
-            log.info(`Reservation ${res._id} (${fullName} — ${nickname}): ${convCount} conversations, ${messages.length} chars of messages`);
-            if (!messages) {
-                log.info(`Skipping ${fullName} — no messages found`);
-                continue;
-            }
-            results.push({ reservationId: res._id, guestName: fullName, listingNickname: nickname, country, messages });
-        }
-        catch (err) {
-            log.error(`Failed to process reservation ${res._id}`, { error: String(err) });
-        }
-    }
-    log.info(`${results.length} reservations with messages ready for analysis`);
-    return results;
-}
 async function sendDailyReport(reportType) {
     log.info(`Sending ${reportType} report`);
     const dateStr = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
     try {
-        const reservations = await fetchActiveReservations();
+        const conversations = (0, memory_js_1.getAllActiveConversations)();
+        log.info(`Found ${conversations.length} active conversations in memory`);
         const israelCases = [];
         const athensCases = [];
-        for (const res of reservations) {
-            const caseResult = await (0, report_js_1.analyzeGuestCase)(res.guestName, res.listingNickname, res.messages);
-            log.info(`Analysis for ${res.guestName}: ${caseResult ? caseResult.status : "none"}`);
+        let israelTotal = 0;
+        let athensTotal = 0;
+        for (const conv of conversations) {
+            const isGreece = conv.country.toLowerCase() === "greece" || conv.country.toLowerCase() === "gr";
+            if (isGreece)
+                athensTotal++;
+            else
+                israelTotal++;
+            const caseResult = await (0, report_js_1.analyzeGuestCase)(conv.guestName, conv.listingNickname, conv.messages);
+            log.info(`Analysis for ${conv.guestName}: ${caseResult ? caseResult.status : "none"}`);
             if (!caseResult)
                 continue;
-            const isGreece = res.country.toLowerCase() === "greece" || res.country.toLowerCase() === "gr";
             if (isGreece) {
                 athensCases.push(caseResult);
             }
@@ -144,8 +87,6 @@ async function sendDailyReport(reportType) {
                 israelCases.push(caseResult);
             }
         }
-        const israelTotal = reservations.filter((r) => r.country.toLowerCase() !== "greece" && r.country.toLowerCase() !== "gr").length;
-        const athensTotal = reservations.filter((r) => r.country.toLowerCase() === "greece" || r.country.toLowerCase() === "gr").length;
         if (israelCases.length > 0 || reportType === "evening") {
             const israelText = buildReportText("Israel", israelCases, israelTotal, reportType, dateStr);
             await postToSlack(config_js_1.config.slackChannelUnhappyIsrael, israelText);

@@ -39,6 +39,8 @@ exports.recordOpportunity = recordOpportunity;
 exports.getLastUnhappyUrgency = getLastUnhappyUrgency;
 exports.getUnhappyThreadTs = getUnhappyThreadTs;
 exports.recordUnhappyAlert = recordUnhappyAlert;
+exports.saveConversation = saveConversation;
+exports.getAllActiveConversations = getAllActiveConversations;
 const logger_js_1 = require("./logger.js");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -105,4 +107,49 @@ function recordUnhappyAlert(reservationId, urgency, slackTs) {
     }
     saveStore(store);
     log.info(`Recorded unhappy alert for reservation ${reservationId} (urgency: ${urgency})`);
+}
+// שמירת השיחה המצטברת לדוח היומי
+function saveConversation(reservationId, messages, meta) {
+    const store = loadStore();
+    if (!store[reservationId]) {
+        store[reservationId] = { sentOpportunities: [] };
+    }
+    store[reservationId].conversationMessages = messages;
+    store[reservationId].guestName = meta.guestName;
+    store[reservationId].listingNickname = meta.listingNickname;
+    store[reservationId].country = meta.country;
+    store[reservationId].checkIn = meta.checkIn;
+    store[reservationId].checkOut = meta.checkOut;
+    store[reservationId].source = meta.source;
+    store[reservationId].lastUpdated = new Date().toISOString();
+    saveStore(store);
+}
+// שליפת כל ההזמנות שיש להן שיחה שמורה
+function getAllActiveConversations() {
+    const store = loadStore();
+    const results = [];
+    for (const [reservationId, data] of Object.entries(store)) {
+        if (!data.conversationMessages || !data.guestName)
+            continue;
+        // מסנן הזמנות ישנות שהצ'ק-אאוט שלהן עבר יותר מ-2 ימים
+        if (data.checkOut) {
+            const checkOut = new Date(data.checkOut);
+            const twoDaysAgo = new Date();
+            twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+            if (checkOut < twoDaysAgo)
+                continue;
+        }
+        results.push({
+            reservationId,
+            messages: data.conversationMessages,
+            guestName: data.guestName,
+            listingNickname: data.listingNickname ?? "Unknown",
+            country: data.country ?? "",
+            checkIn: data.checkIn ?? "",
+            checkOut: data.checkOut ?? "",
+            source: data.source ?? "",
+            lastUpdated: data.lastUpdated ?? "",
+        });
+    }
+    return results;
 }

@@ -8,6 +8,8 @@ const analyzer_js_1 = require("../services/analyzer.js");
 const sentiment_js_1 = require("../services/sentiment.js");
 const memory_js_1 = require("../lib/memory.js");
 const log = (0, logger_js_1.createLogger)("webhook");
+// ערוצים שבהם inquiry/reserved אינם הזמנה רשמית
+const INQUIRY_SOURCES = ["airbnb", "airbnb2", "vrbo"];
 function formatStatus(status, isReturningGuest) {
     if (isReturningGuest)
         return "Returning Guest";
@@ -20,6 +22,23 @@ function formatStatus(status, isReturningGuest) {
         cancelled: "Cancelled",
     };
     return map[status.toLowerCase()] ?? status;
+}
+function isInquiryStatus(status) {
+    return ["inquiry", "reserved", "pending"].includes(status.toLowerCase());
+}
+function isInquirySource(source) {
+    return INQUIRY_SOURCES.includes(source.toLowerCase());
+}
+// האם לנתח WOW על הודעה שוטפת
+function shouldRunWow(reservation) {
+    // אורח חוזר — תמיד WOW
+    if (reservation.isReturningGuest)
+        return true;
+    // inquiry/reserved מ-Airbnb או VRBO — ללא WOW
+    if (isInquiryStatus(reservation.status) && isInquirySource(reservation.source)) {
+        return false;
+    }
+    return true;
 }
 function extractMessagesFromThread(thread) {
     return thread
@@ -54,7 +73,18 @@ function wasJustConfirmed(event) {
     const isNowConfirmed = newStatus.toLowerCase() === "confirmed";
     return wasInquiry && isNowConfirmed;
 }
-async function handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment, }) {
+async function handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment, runWow, }) {
+    // שמור שיחה בזיכרון לדוח היומי
+    if (guestMessages && listing) {
+        (0, memory_js_1.saveConversation)(reservationId, guestMessages, {
+            guestName: reservation.guestName,
+            listingNickname: listing.title,
+            country: listing.country,
+            checkIn: reservation.checkIn,
+            checkOut: reservation.checkOut,
+            source: reservation.source,
+        });
+    }
     const pastOpportunities = (0, memory_js_1.getPastOpportunities)(reservationId);
     let guestHistory = "";
     if (reservation.guestId) {
@@ -64,25 +94,30 @@ async function handleAnalysis({ reservationId, guestMessages, messageCount, rese
         }
     }
     const promises = [];
-    promises.push((0, analyzer_js_1.analyze)(reservation.guestName, guestMessages, pastOpportunities, guestHistory).then(async (analysis) => {
-        log.info("WOW analysis result", { isOpportunity: analysis.isOpportunity });
-        if (!analysis.isOpportunity)
-            return;
-        const alertParams = (0, slack_js_1.buildAlertParams)({
-            country: listing?.country ?? "",
-            guestName: reservation.guestName,
-            listingTitle: listing?.title ?? "Unknown",
-            checkIn: reservation.checkIn,
-            checkOut: reservation.checkOut,
-            source: reservation.source,
-            status,
-            material: analysis.material,
-            personal: analysis.personal,
-            why: analysis.why,
-        });
-        await (0, slack_js_1.sendAlert)(alertParams);
-        (0, memory_js_1.recordOpportunity)(reservationId, analysis.why);
-    }));
+    if (runWow) {
+        promises.push((0, analyzer_js_1.analyze)(reservation.guestName, guestMessages, pastOpportunities, guestHistory).then(async (analysis) => {
+            log.info("WOW analysis result", { isOpportunity: analysis.isOpportunity });
+            if (!analysis.isOpportunity)
+                return;
+            const alertParams = (0, slack_js_1.buildAlertParams)({
+                country: listing?.country ?? "",
+                guestName: reservation.guestName,
+                listingTitle: listing?.title ?? "Unknown",
+                checkIn: reservation.checkIn,
+                checkOut: reservation.checkOut,
+                source: reservation.source,
+                status,
+                material: analysis.material,
+                personal: analysis.personal,
+                why: analysis.why,
+            });
+            await (0, slack_js_1.sendAlert)(alertParams);
+            (0, memory_js_1.recordOpportunity)(reservationId, analysis.why);
+        }));
+    }
+    else {
+        log.info(`WOW skipped — inquiry status from ${reservation.source}`);
+    }
     if (runSentiment) {
         promises.push((0, sentiment_js_1.analyzeSentiment)(reservation.guestName, guestMessages, messageCount, reservation.checkIn, reservation.totalPrice).then(async (sentiment) => {
             log.info("Sentiment analysis result", { isUnhappy: sentiment.isUnhappy, urgency: sentiment.urgency });
@@ -168,7 +203,8 @@ async function webhookHandler(req, res) {
                 country: listing?.country ?? "",
                 status,
             });
-            await handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment: false });
+            // בעת אישור — תמיד WOW, ללא סנטימנט
+            await handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment: false, runWow: true });
             return;
         }
         if (eventType === "reservation.messageReceived") {
@@ -192,7 +228,8 @@ async function webhookHandler(req, res) {
                 status,
                 isReturningGuest: reservation.isReturningGuest,
             });
-            await handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment: true });
+            const runWow = shouldRunWow(reservation);
+            await handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment: true, runWow });
             return;
         }
         log.info("Unknown event type, skipping", { eventType });

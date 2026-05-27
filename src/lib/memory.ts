@@ -12,6 +12,14 @@ interface ReservationMemory {
   sentOpportunities: string[];
   lastUnhappyUrgency?: Urgency;
   unhappySlackTs?: string;
+  conversationMessages?: string; // שיחה מצטברת לדוח
+  guestName?: string;
+  listingNickname?: string;
+  country?: string;
+  checkIn?: string;
+  checkOut?: string;
+  source?: string;
+  lastUpdated?: string;
 }
 
 type MemoryStore = Record<string, ReservationMemory>;
@@ -84,4 +92,74 @@ export function recordUnhappyAlert(
   }
   saveStore(store);
   log.info(`Recorded unhappy alert for reservation ${reservationId} (urgency: ${urgency})`);
+}
+
+// שמירת השיחה המצטברת לדוח היומי
+export function saveConversation(
+  reservationId: string,
+  messages: string,
+  meta: {
+    guestName: string;
+    listingNickname: string;
+    country: string;
+    checkIn: string;
+    checkOut: string;
+    source: string;
+  }
+): void {
+  const store = loadStore();
+  if (!store[reservationId]) {
+    store[reservationId] = { sentOpportunities: [] };
+  }
+  store[reservationId].conversationMessages = messages;
+  store[reservationId].guestName = meta.guestName;
+  store[reservationId].listingNickname = meta.listingNickname;
+  store[reservationId].country = meta.country;
+  store[reservationId].checkIn = meta.checkIn;
+  store[reservationId].checkOut = meta.checkOut;
+  store[reservationId].source = meta.source;
+  store[reservationId].lastUpdated = new Date().toISOString();
+  saveStore(store);
+}
+
+// שליפת כל ההזמנות שיש להן שיחה שמורה
+export function getAllActiveConversations(): Array<{
+  reservationId: string;
+  messages: string;
+  guestName: string;
+  listingNickname: string;
+  country: string;
+  checkIn: string;
+  checkOut: string;
+  source: string;
+  lastUpdated: string;
+}> {
+  const store = loadStore();
+  const results = [];
+
+  for (const [reservationId, data] of Object.entries(store)) {
+    if (!data.conversationMessages || !data.guestName) continue;
+
+    // מסנן הזמנות ישנות שהצ'ק-אאוט שלהן עבר יותר מ-2 ימים
+    if (data.checkOut) {
+      const checkOut = new Date(data.checkOut);
+      const twoDaysAgo = new Date();
+      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+      if (checkOut < twoDaysAgo) continue;
+    }
+
+    results.push({
+      reservationId,
+      messages: data.conversationMessages,
+      guestName: data.guestName,
+      listingNickname: data.listingNickname ?? "Unknown",
+      country: data.country ?? "",
+      checkIn: data.checkIn ?? "",
+      checkOut: data.checkOut ?? "",
+      source: data.source ?? "",
+      lastUpdated: data.lastUpdated ?? "",
+    });
+  }
+
+  return results;
 }

@@ -10,12 +10,16 @@ import {
   getLastUnhappyUrgency,
   getUnhappyThreadTs,
   recordUnhappyAlert,
+  saveConversation,
   URGENCY_RANK,
 } from "../lib/memory.js";
 import type { Urgency } from "../lib/memory.js";
 import type { GuestyMessage, WebhookContext } from "../types.js";
 
 const log = createLogger("webhook");
+
+// ערוצים שבהם inquiry/reserved אינם הזמנה רשמית
+const INQUIRY_SOURCES = ["airbnb", "airbnb2", "vrbo"];
 
 function formatStatus(status: string, isReturningGuest: boolean): string {
   if (isReturningGuest) return "Returning Guest";
@@ -28,6 +32,31 @@ function formatStatus(status: string, isReturningGuest: boolean): string {
     cancelled: "Cancelled",
   };
   return map[status.toLowerCase()] ?? status;
+}
+
+function isInquiryStatus(status: string): boolean {
+  return ["inquiry", "reserved", "pending"].includes(status.toLowerCase());
+}
+
+function isInquirySource(source: string): boolean {
+  return INQUIRY_SOURCES.includes(source.toLowerCase());
+}
+
+// האם לנתח WOW על הודעה שוטפת
+function shouldRunWow(reservation: {
+  status: string;
+  source: string;
+  isReturningGuest: boolean;
+}): boolean {
+  // אורח חוזר — תמיד WOW
+  if (reservation.isReturningGuest) return true;
+
+  // inquiry/reserved מ-Airbnb או VRBO — ללא WOW
+  if (isInquiryStatus(reservation.status) && isInquirySource(reservation.source)) {
+    return false;
+  }
+
+  return true;
 }
 
 function extractMessagesFromThread(thread: GuestyMessage[]): string {
@@ -79,6 +108,7 @@ async function handleAnalysis({
   listing,
   status,
   runSentiment,
+  runWow,
 }: {
   reservationId: string;
   guestMessages: string;
@@ -87,7 +117,20 @@ async function handleAnalysis({
   listing: { country: string; title: string } | null;
   status: string;
   runSentiment: boolean;
+  runWow: boolean;
 }): Promise<void> {
+  // שמור שיחה בזיכרון לדוח היומי
+  if (guestMessages && listing) {
+    saveConversation(reservationId, guestMessages, {
+      guestName: reservation.guestName,
+      listingNickname: listing.title,
+      country: listing.country,
+      checkIn: reservation.checkIn,
+      checkOut: reservation.checkOut,
+      source: reservation.source,
+    });
+  }
+
   const pastOpportunities = getPastOpportunities(reservationId);
 
   let guestHistory = "";
@@ -100,28 +143,32 @@ async function handleAnalysis({
 
   const promises: Promise<void>[] = [];
 
-  promises.push(
-    analyze(reservation.guestName, guestMessages, pastOpportunities, guestHistory).then(async (analysis) => {
-      log.info("WOW analysis result", { isOpportunity: analysis.isOpportunity });
-      if (!analysis.isOpportunity) return;
+  if (runWow) {
+    promises.push(
+      analyze(reservation.guestName, guestMessages, pastOpportunities, guestHistory).then(async (analysis) => {
+        log.info("WOW analysis result", { isOpportunity: analysis.isOpportunity });
+        if (!analysis.isOpportunity) return;
 
-      const alertParams = buildAlertParams({
-        country: listing?.country ?? "",
-        guestName: reservation.guestName,
-        listingTitle: listing?.title ?? "Unknown",
-        checkIn: reservation.checkIn,
-        checkOut: reservation.checkOut,
-        source: reservation.source,
-        status,
-        material: analysis.material,
-        personal: analysis.personal,
-        why: analysis.why,
-      });
+        const alertParams = buildAlertParams({
+          country: listing?.country ?? "",
+          guestName: reservation.guestName,
+          listingTitle: listing?.title ?? "Unknown",
+          checkIn: reservation.checkIn,
+          checkOut: reservation.checkOut,
+          source: reservation.source,
+          status,
+          material: analysis.material,
+          personal: analysis.personal,
+          why: analysis.why,
+        });
 
-      await sendAlert(alertParams);
-      recordOpportunity(reservationId, analysis.why);
-    })
-  );
+        await sendAlert(alertParams);
+        recordOpportunity(reservationId, analysis.why);
+      })
+    );
+  } else {
+    log.info(`WOW skipped — inquiry status from ${reservation.source}`);
+  }
 
   if (runSentiment) {
     promises.push(
@@ -226,7 +273,8 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
         status,
       });
 
-      await handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment: false });
+      // בעת אישור — תמיד WOW, ללא סנטימנט
+      await handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment: false, runWow: true });
       return;
     }
 
@@ -256,7 +304,9 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
         isReturningGuest: reservation.isReturningGuest,
       });
 
-      await handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment: true });
+      const runWow = shouldRunWow(reservation);
+
+      await handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment: true, runWow });
       return;
     }
 
