@@ -120,15 +120,16 @@ async function handleAnalysis({
   runWow: boolean;
 }): Promise<void> {
   // שמור שיחה בזיכרון לדוח היומי
-  if (guestMessages && listing) {
+  if (guestMessages) {
     saveConversation(reservationId, guestMessages, {
       guestName: reservation.guestName,
-      listingNickname: listing.title,
-      country: listing.country,
+      listingNickname: listing?.title ?? "Unknown",
+      country: listing?.country ?? "",
       checkIn: reservation.checkIn,
       checkOut: reservation.checkOut,
       source: reservation.source,
     });
+    log.info(`Conversation saved for ${reservation.guestName} (${reservationId})`);
   }
 
   const pastOpportunities = getPastOpportunities(reservationId);

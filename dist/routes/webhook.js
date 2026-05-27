@@ -75,15 +75,16 @@ function wasJustConfirmed(event) {
 }
 async function handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment, runWow, }) {
     // שמור שיחה בזיכרון לדוח היומי
-    if (guestMessages && listing) {
+    if (guestMessages) {
         (0, memory_js_1.saveConversation)(reservationId, guestMessages, {
             guestName: reservation.guestName,
-            listingNickname: listing.title,
-            country: listing.country,
+            listingNickname: listing?.title ?? "Unknown",
+            country: listing?.country ?? "",
             checkIn: reservation.checkIn,
             checkOut: reservation.checkOut,
             source: reservation.source,
         });
+        log.info(`Conversation saved for ${reservation.guestName} (${reservationId})`);
     }
     const pastOpportunities = (0, memory_js_1.getPastOpportunities)(reservationId);
     let guestHistory = "";
