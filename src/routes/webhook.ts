@@ -10,6 +10,8 @@ import {
   getLastUnhappyUrgency,
   getUnhappyThreadTs,
   recordUnhappyAlert,
+  getWowThreadTs,
+  recordWowAlert,
   saveConversation,
   URGENCY_RANK,
 } from "../lib/memory.js";
@@ -165,7 +167,7 @@ async function handleAnalysis({
 
   if (runSentiment) {
     promises.push(
-      analyzeSentiment(reservation.guestName, guestMessages, messageCount, reservation.checkIn, reservation.totalPrice).then(async (sentiment) => {
+      analyzeSentiment(reservation.guestName, guestMessages, messageCount, reservation.checkIn, reservation.checkOut, reservation.totalPrice).then(async (sentiment) => {
         log.info("Sentiment analysis result", { isUnhappy: sentiment.isUnhappy, urgency: sentiment.urgency });
 
         const lastUrgency = await getLastUnhappyUrgency(reservationId);

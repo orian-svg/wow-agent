@@ -14,6 +14,7 @@ interface ReservationMemory {
   sentOpportunities: string[];
   lastUnhappyUrgency?: Urgency;
   unhappySlackTs?: string;
+  wowSlackTs?: string;
   conversationMessages?: string;
   guestName?: string;
   listingNickname?: string;
@@ -82,6 +83,20 @@ export async function recordUnhappyAlert(
   if (slackTs) data.unhappySlackTs = slackTs;
   await setRecord(reservationId, data);
   log.info(`Recorded unhappy alert for reservation ${reservationId} (urgency: ${urgency})`);
+}
+
+export async function getWowThreadTs(reservationId: string): Promise<string | undefined> {
+  const data = await getRecord(reservationId);
+  return data.wowSlackTs;
+}
+
+export async function recordWowAlert(
+  reservationId: string,
+  slackTs?: string
+): Promise<void> {
+  const data = await getRecord(reservationId);
+  if (slackTs) data.wowSlackTs = slackTs;
+  await setRecord(reservationId, data);
 }
 
 export async function saveConversation(

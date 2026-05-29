@@ -115,7 +115,7 @@ async function handleAnalysis({ reservationId, guestMessages, messageCount, rese
         log.info(`WOW skipped — inquiry status from ${reservation.source}`);
     }
     if (runSentiment) {
-        promises.push((0, sentiment_js_1.analyzeSentiment)(reservation.guestName, guestMessages, messageCount, reservation.checkIn, reservation.totalPrice).then(async (sentiment) => {
+        promises.push((0, sentiment_js_1.analyzeSentiment)(reservation.guestName, guestMessages, messageCount, reservation.checkIn, reservation.checkOut, reservation.totalPrice).then(async (sentiment) => {
             log.info("Sentiment analysis result", { isUnhappy: sentiment.isUnhappy, urgency: sentiment.urgency });
             const lastUrgency = await (0, memory_js_1.getLastUnhappyUrgency)(reservationId);
             const threadTs = await (0, memory_js_1.getUnhappyThreadTs)(reservationId);

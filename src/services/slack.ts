@@ -86,9 +86,10 @@ export function buildAlertParams(input: {
   };
 }
 
-export async function sendAlert(params: SlackAlertParams): Promise<void> {
+export async function sendAlert(params: SlackAlertParams, threadTs?: string): Promise<string | undefined> {
+  const isUpdate = !!threadTs;
   const text = [
-    "*WOW Opportunity* 🌟",
+    isUpdate ? "*New WOW Opportunity* 🌟" : "*WOW Opportunity* 🌟",
     "",
     `*Guest:* ${params.guestName}`,
     `*Listing:* ${params.listingTitle}`,
@@ -104,7 +105,7 @@ export async function sendAlert(params: SlackAlertParams): Promise<void> {
     `*Why:* "${params.why}"`,
   ].join("\n");
 
-  await postToSlack(params.channel, text);
+  return await postToSlack(params.channel, text, threadTs);
 }
 
 export async function sendUnhappyAlert(params: {

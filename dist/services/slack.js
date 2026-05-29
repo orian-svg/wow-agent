@@ -76,9 +76,10 @@ function buildAlertParams(input) {
         why: input.why,
     };
 }
-async function sendAlert(params) {
+async function sendAlert(params, threadTs) {
+    const isUpdate = !!threadTs;
     const text = [
-        "*WOW Opportunity* 🌟",
+        isUpdate ? "*New WOW Opportunity* 🌟" : "*WOW Opportunity* 🌟",
         "",
         `*Guest:* ${params.guestName}`,
         `*Listing:* ${params.listingTitle}`,
@@ -93,7 +94,7 @@ async function sendAlert(params) {
         "",
         `*Why:* "${params.why}"`,
     ].join("\n");
-    await postToSlack(params.channel, text);
+    return await postToSlack(params.channel, text, threadTs);
 }
 async function sendUnhappyAlert(params) {
     const emoji = urgencyEmoji(params.sentiment.urgency);

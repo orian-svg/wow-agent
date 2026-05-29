@@ -6,6 +6,8 @@ exports.recordOpportunity = recordOpportunity;
 exports.getLastUnhappyUrgency = getLastUnhappyUrgency;
 exports.getUnhappyThreadTs = getUnhappyThreadTs;
 exports.recordUnhappyAlert = recordUnhappyAlert;
+exports.getWowThreadTs = getWowThreadTs;
+exports.recordWowAlert = recordWowAlert;
 exports.saveConversation = saveConversation;
 exports.getAllActiveConversations = getAllActiveConversations;
 const logger_js_1 = require("./logger.js");
@@ -65,6 +67,16 @@ async function recordUnhappyAlert(reservationId, urgency, slackTs) {
         data.unhappySlackTs = slackTs;
     await setRecord(reservationId, data);
     log.info(`Recorded unhappy alert for reservation ${reservationId} (urgency: ${urgency})`);
+}
+async function getWowThreadTs(reservationId) {
+    const data = await getRecord(reservationId);
+    return data.wowSlackTs;
+}
+async function recordWowAlert(reservationId, slackTs) {
+    const data = await getRecord(reservationId);
+    if (slackTs)
+        data.wowSlackTs = slackTs;
+    await setRecord(reservationId, data);
 }
 async function saveConversation(reservationId, messages, meta) {
     const data = await getRecord(reservationId);
