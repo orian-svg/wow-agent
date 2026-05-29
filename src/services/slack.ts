@@ -118,13 +118,16 @@ export async function sendUnhappyAlert(params: {
   messageCount: number;
   sentiment: SentimentAnalysis;
   threadTs?: string;
+  isAdditionalIssue?: boolean;
 }): Promise<string | undefined> {
   const emoji = urgencyEmoji(params.sentiment.urgency);
   const urgencyLabel = params.sentiment.urgency.charAt(0).toUpperCase() + params.sentiment.urgency.slice(1);
   const isUpdate = !!params.threadTs;
 
   const text = [
-    isUpdate
+    params.isAdditionalIssue
+      ? `*Additional Urgent Issue* ${emoji}`
+      : isUpdate
       ? `*Urgency escalated to ${urgencyLabel}* ${emoji}`
       : `*Unhappy Guest* ${emoji}`,
     "",

@@ -124,25 +124,28 @@ async function handleAnalysis({ reservationId, guestMessages, messageCount, rese
             const lastRank = lastUrgency !== undefined ? memory_js_1.URGENCY_RANK[lastUrgency] : undefined;
             if (!sentiment.isUnhappy && lastUrgency === undefined)
                 return;
+            if (sentiment.isUnhappy && sentiment.urgency === "high") {
+                // High חדש — תמיד שולחים הודעה חדשה (לא בשרשור)
+                // אם יש כבר High קודם, נציין שזו תקלה נוספת
+                const isAdditionalIssue = lastUrgency === "high";
+                const ts = await (0, slack_js_1.sendUnhappyAlert)({
+                    country: listing?.country ?? "",
+                    guestName: reservation.guestName,
+                    listingTitle: listing?.title ?? "Unknown",
+                    checkIn: reservation.checkIn,
+                    checkOut: reservation.checkOut,
+                    source: reservation.source,
+                    messageCount,
+                    sentiment,
+                    threadTs: undefined, // תמיד הודעה חדשה
+                    isAdditionalIssue,
+                });
+                await (0, memory_js_1.recordUnhappyAlert)(reservationId, newUrgency, ts);
+                return;
+            }
             if (sentiment.isUnhappy && (lastRank === undefined || newRank > lastRank)) {
-                if (sentiment.urgency === "high") {
-                    const ts = await (0, slack_js_1.sendUnhappyAlert)({
-                        country: listing?.country ?? "",
-                        guestName: reservation.guestName,
-                        listingTitle: listing?.title ?? "Unknown",
-                        checkIn: reservation.checkIn,
-                        checkOut: reservation.checkOut,
-                        source: reservation.source,
-                        messageCount,
-                        sentiment,
-                        threadTs,
-                    });
-                    await (0, memory_js_1.recordUnhappyAlert)(reservationId, newUrgency, threadTs ? undefined : ts);
-                }
-                else {
-                    await (0, memory_js_1.recordUnhappyAlert)(reservationId, newUrgency);
-                    log.info(`Urgency ${sentiment.urgency} — saved for daily report, no real-time alert`);
-                }
+                await (0, memory_js_1.recordUnhappyAlert)(reservationId, newUrgency);
+                log.info(`Urgency ${sentiment.urgency} — saved for daily report, no real-time alert`);
                 return;
             }
             if (lastUrgency !== undefined && newRank < lastRank && threadTs) {

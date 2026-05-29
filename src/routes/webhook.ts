@@ -178,24 +178,29 @@ async function handleAnalysis({
 
         if (!sentiment.isUnhappy && lastUrgency === undefined) return;
 
+        if (sentiment.isUnhappy && sentiment.urgency === "high") {
+          // High חדש — תמיד שולחים הודעה חדשה (לא בשרשור)
+          // אם יש כבר High קודם, נציין שזו תקלה נוספת
+          const isAdditionalIssue = lastUrgency === "high";
+          const ts = await sendUnhappyAlert({
+            country: listing?.country ?? "",
+            guestName: reservation.guestName,
+            listingTitle: listing?.title ?? "Unknown",
+            checkIn: reservation.checkIn,
+            checkOut: reservation.checkOut,
+            source: reservation.source,
+            messageCount,
+            sentiment,
+            threadTs: undefined, // תמיד הודעה חדשה
+            isAdditionalIssue,
+          });
+          await recordUnhappyAlert(reservationId, newUrgency, ts);
+          return;
+        }
+
         if (sentiment.isUnhappy && (lastRank === undefined || newRank > lastRank)) {
-          if (sentiment.urgency === "high") {
-            const ts = await sendUnhappyAlert({
-              country: listing?.country ?? "",
-              guestName: reservation.guestName,
-              listingTitle: listing?.title ?? "Unknown",
-              checkIn: reservation.checkIn,
-              checkOut: reservation.checkOut,
-              source: reservation.source,
-              messageCount,
-              sentiment,
-              threadTs,
-            });
-            await recordUnhappyAlert(reservationId, newUrgency, threadTs ? undefined : ts);
-          } else {
-            await recordUnhappyAlert(reservationId, newUrgency);
-            log.info(`Urgency ${sentiment.urgency} — saved for daily report, no real-time alert`);
-          }
+          await recordUnhappyAlert(reservationId, newUrgency);
+          log.info(`Urgency ${sentiment.urgency} — saved for daily report, no real-time alert`);
           return;
         }
 

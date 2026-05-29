@@ -101,9 +101,11 @@ async function sendUnhappyAlert(params) {
     const urgencyLabel = params.sentiment.urgency.charAt(0).toUpperCase() + params.sentiment.urgency.slice(1);
     const isUpdate = !!params.threadTs;
     const text = [
-        isUpdate
-            ? `*Urgency escalated to ${urgencyLabel}* ${emoji}`
-            : `*Unhappy Guest* ${emoji}`,
+        params.isAdditionalIssue
+            ? `*Additional Urgent Issue* ${emoji}`
+            : isUpdate
+                ? `*Urgency escalated to ${urgencyLabel}* ${emoji}`
+                : `*Unhappy Guest* ${emoji}`,
         "",
         `*Guest:* ${params.guestName}`,
         `*Listing:* ${params.listingTitle}`,
