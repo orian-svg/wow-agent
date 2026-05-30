@@ -124,12 +124,23 @@ export async function sendUnhappyAlert(params: {
   const urgencyLabel = params.sentiment.urgency.charAt(0).toUpperCase() + params.sentiment.urgency.slice(1);
   const isUpdate = !!params.threadTs;
 
+  const headline = params.isAdditionalIssue
+    ? `*Additional Urgent Issue* ${emoji}`
+    : isUpdate
+    ? `*Urgency escalated to ${urgencyLabel}* ${emoji}`
+    : `*Unhappy Guest* ${emoji}`;
+
+  // שורת סיכום קצרה בראש ההודעה
+  const issueSummary = params.sentiment.issue
+    ? params.sentiment.issue.length > 60
+      ? params.sentiment.issue.substring(0, 57) + "..."
+      : params.sentiment.issue
+    : "";
+  const summaryLine = `${emoji} *${params.guestName} — ${params.listingTitle}* — ${issueSummary}`;
+
   const text = [
-    params.isAdditionalIssue
-      ? `*Additional Urgent Issue* ${emoji}`
-      : isUpdate
-      ? `*Urgency escalated to ${urgencyLabel}* ${emoji}`
-      : `*Unhappy Guest* ${emoji}`,
+    headline,
+    summaryLine,
     "",
     `*Guest:* ${params.guestName}`,
     `*Listing:* ${params.listingTitle}`,
