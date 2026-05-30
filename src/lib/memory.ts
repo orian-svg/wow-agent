@@ -13,6 +13,7 @@ export type Urgency = "low" | "medium" | "high" | "resolved";
 interface ReservationMemory {
   sentOpportunities: string[];
   lastUnhappyUrgency?: Urgency;
+  lastUnhappyIssue?: string;
   unhappySlackTs?: string;
   wowSlackTs?: string;
   conversationMessages?: string;
@@ -73,14 +74,21 @@ export async function getUnhappyThreadTs(reservationId: string): Promise<string 
   return data.unhappySlackTs;
 }
 
+export async function getLastUnhappyIssue(reservationId: string): Promise<string | undefined> {
+  const data = await getRecord(reservationId);
+  return data.lastUnhappyIssue;
+}
+
 export async function recordUnhappyAlert(
   reservationId: string,
   urgency: Urgency,
-  slackTs?: string
+  slackTs?: string,
+  issue?: string
 ): Promise<void> {
   const data = await getRecord(reservationId);
   data.lastUnhappyUrgency = urgency;
   if (slackTs) data.unhappySlackTs = slackTs;
+  if (issue) data.lastUnhappyIssue = issue;
   await setRecord(reservationId, data);
   log.info(`Recorded unhappy alert for reservation ${reservationId} (urgency: ${urgency})`);
 }

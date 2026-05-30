@@ -125,8 +125,14 @@ async function handleAnalysis({ reservationId, guestMessages, messageCount, rese
             if (!sentiment.isUnhappy && lastUrgency === undefined)
                 return;
             if (sentiment.isUnhappy && sentiment.urgency === "high") {
-                // High חדש — תמיד שולחים הודעה חדשה (לא בשרשור)
-                // אם יש כבר High קודם, נציין שזו תקלה נוספת
+                // High חדש — בודקים אם הבעיה שונה מהקודמת
+                const lastIssue = await (0, memory_js_1.getLastUnhappyIssue)(reservationId);
+                const isSameIssue = lastIssue && sentiment.issue &&
+                    lastIssue.toLowerCase().substring(0, 60) === sentiment.issue.toLowerCase().substring(0, 60);
+                if (isSameIssue) {
+                    log.info(`Same High issue already reported — skipping duplicate alert`);
+                    return;
+                }
                 const isAdditionalIssue = lastUrgency === "high";
                 const ts = await (0, slack_js_1.sendUnhappyAlert)({
                     country: listing?.country ?? "",
@@ -137,14 +143,14 @@ async function handleAnalysis({ reservationId, guestMessages, messageCount, rese
                     source: reservation.source,
                     messageCount,
                     sentiment,
-                    threadTs: undefined, // תמיד הודעה חדשה
+                    threadTs: undefined,
                     isAdditionalIssue,
                 });
-                await (0, memory_js_1.recordUnhappyAlert)(reservationId, newUrgency, ts);
+                await (0, memory_js_1.recordUnhappyAlert)(reservationId, newUrgency, ts, sentiment.issue);
                 return;
             }
             if (sentiment.isUnhappy && (lastRank === undefined || newRank > lastRank)) {
-                await (0, memory_js_1.recordUnhappyAlert)(reservationId, newUrgency);
+                await (0, memory_js_1.recordUnhappyAlert)(reservationId, newUrgency, undefined, sentiment.issue);
                 log.info(`Urgency ${sentiment.urgency} — saved for daily report, no real-time alert`);
                 return;
             }

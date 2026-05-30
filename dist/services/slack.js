@@ -118,7 +118,6 @@ async function sendUnhappyAlert(params) {
         `*Urgency:* ${urgencyLabel}`,
         `*Guest tone:* ${params.sentiment.guestTone}`,
         `*Issue:* ${params.sentiment.issue}`,
-        `*Suggested action:* ${params.sentiment.suggestion}`,
     ].join("\n");
     const channel = unhappyChannelForCountry(params.country);
     return await postToSlack(channel, text, params.threadTs);

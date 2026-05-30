@@ -5,6 +5,7 @@ exports.getPastOpportunities = getPastOpportunities;
 exports.recordOpportunity = recordOpportunity;
 exports.getLastUnhappyUrgency = getLastUnhappyUrgency;
 exports.getUnhappyThreadTs = getUnhappyThreadTs;
+exports.getLastUnhappyIssue = getLastUnhappyIssue;
 exports.recordUnhappyAlert = recordUnhappyAlert;
 exports.getWowThreadTs = getWowThreadTs;
 exports.recordWowAlert = recordWowAlert;
@@ -60,11 +61,17 @@ async function getUnhappyThreadTs(reservationId) {
     const data = await getRecord(reservationId);
     return data.unhappySlackTs;
 }
-async function recordUnhappyAlert(reservationId, urgency, slackTs) {
+async function getLastUnhappyIssue(reservationId) {
+    const data = await getRecord(reservationId);
+    return data.lastUnhappyIssue;
+}
+async function recordUnhappyAlert(reservationId, urgency, slackTs, issue) {
     const data = await getRecord(reservationId);
     data.lastUnhappyUrgency = urgency;
     if (slackTs)
         data.unhappySlackTs = slackTs;
+    if (issue)
+        data.lastUnhappyIssue = issue;
     await setRecord(reservationId, data);
     log.info(`Recorded unhappy alert for reservation ${reservationId} (urgency: ${urgency})`);
 }
