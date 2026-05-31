@@ -27,8 +27,7 @@ URGENCY:
 OUTPUT ONLY this exact format:
 STATUS: open/resolved_uncertain/resolved_confirmed/none
 URGENCY: high/medium/low
-ISSUE: [one sentence describing the problem, or "None"]
-ACTION: [one concrete action for the team, or "None needed"]`;
+ISSUE: [one sentence describing the problem, or "None"]`;
 async function analyzeGuestCase(guestName, listingNickname, messages) {
     try {
         const response = await client.messages.create({
@@ -41,8 +40,7 @@ async function analyzeGuestCase(guestName, listingNickname, messages) {
         const text = first && first.type === "text" ? first.text : "";
         const statusMatch = text.match(/STATUS:\s*(open|resolved_uncertain|resolved_confirmed|none)/i);
         const urgencyMatch = text.match(/URGENCY:\s*(high|medium|low)/i);
-        const issueMatch = text.match(/ISSUE:([\s\S]*?)(?=ACTION:|$)/i);
-        const actionMatch = text.match(/ACTION:([\s\S]*?)$/i);
+        const issueMatch = text.match(/ISSUE:([\s\S]*?)$/i);
         const status = statusMatch?.[1]?.toLowerCase();
         if (!status || status === "none")
             return null;
@@ -52,7 +50,6 @@ async function analyzeGuestCase(guestName, listingNickname, messages) {
             issue: issueMatch?.[1]?.trim() ?? "",
             status,
             urgency: (urgencyMatch?.[1]?.toLowerCase() ?? "low"),
-            actionNeeded: actionMatch?.[1]?.trim() ?? "None needed",
         };
     }
     catch (err) {

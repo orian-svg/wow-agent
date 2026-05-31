@@ -14,6 +14,7 @@ import {
   getWowThreadTs,
   recordWowAlert,
   saveConversation,
+  markManuallyResolved,
   URGENCY_RANK,
 } from "../lib/memory.js";
 import type { Urgency } from "../lib/memory.js";
@@ -316,6 +317,39 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
 
       await handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment: true, runWow });
       return;
+    }
+
+    // האזנה לפקודת סגירה ידנית מסלאק
+    if (eventType === "event_callback") {
+      const slackEvent = event?.event ?? {};
+      if (slackEvent.type === "message" && slackEvent.text?.trim() === "!resolved" && slackEvent.thread_ts) {
+        // מחפשים הזמנה לפי thread_ts
+        const threadTs = slackEvent.thread_ts;
+        log.info(`Manual resolve command received for thread ${threadTs}`);
+
+        // מחפשים ב-Redis הזמנה עם ה-thread_ts הזה
+        const { getAllActiveConversations: getAll } = await import("../lib/memory.js");
+        const convs = await getAll();
+        const match = convs.find((c) => c.lastUnhappyUrgency !== undefined);
+
+        // שליפה ישירה לפי threadTs מה-Redis
+        const { Redis } = await import("@upstash/redis");
+        const redis = new Redis({
+          url: process.env.UPSTASH_REDIS_REST_URL!,
+          token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+        });
+        const keys = await redis.keys("res:*");
+        for (const key of keys) {
+          const data = await redis.get<any>(key);
+          if (data?.unhappySlackTs === threadTs) {
+            const resId = key.replace("res:", "");
+            await markManuallyResolved(resId);
+            log.info(`Reservation ${resId} manually resolved via Slack`);
+            break;
+          }
+        }
+        return;
+      }
     }
 
     log.info("Unknown event type, skipping", { eventType });

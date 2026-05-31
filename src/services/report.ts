@@ -11,7 +11,7 @@ export interface GuestCaseStatus {
   issue: string;
   status: "open" | "resolved_uncertain" | "resolved_confirmed";
   urgency: "high" | "medium" | "low";
-  actionNeeded: string;
+  openedAt?: string;
 }
 
 const SYSTEM_PROMPT = `You are a hospitality operations analyst for O&O Group, a vacation rental company.
@@ -32,8 +32,7 @@ URGENCY:
 OUTPUT ONLY this exact format:
 STATUS: open/resolved_uncertain/resolved_confirmed/none
 URGENCY: high/medium/low
-ISSUE: [one sentence describing the problem, or "None"]
-ACTION: [one concrete action for the team, or "None needed"]`;
+ISSUE: [one sentence describing the problem, or "None"]`;
 
 export async function analyzeGuestCase(
   guestName: string,
@@ -53,8 +52,7 @@ export async function analyzeGuestCase(
 
     const statusMatch = text.match(/STATUS:\s*(open|resolved_uncertain|resolved_confirmed|none)/i);
     const urgencyMatch = text.match(/URGENCY:\s*(high|medium|low)/i);
-    const issueMatch = text.match(/ISSUE:([\s\S]*?)(?=ACTION:|$)/i);
-    const actionMatch = text.match(/ACTION:([\s\S]*?)$/i);
+    const issueMatch = text.match(/ISSUE:([\s\S]*?)$/i);
 
     const status = statusMatch?.[1]?.toLowerCase() as GuestCaseStatus["status"] | "none";
     if (!status || status === "none") return null;
@@ -65,7 +63,6 @@ export async function analyzeGuestCase(
       issue: issueMatch?.[1]?.trim() ?? "",
       status,
       urgency: (urgencyMatch?.[1]?.toLowerCase() ?? "low") as GuestCaseStatus["urgency"],
-      actionNeeded: actionMatch?.[1]?.trim() ?? "None needed",
     };
   } catch (err) {
     log.error(`Failed to analyze guest case for ${guestName}`, { error: String(err) });

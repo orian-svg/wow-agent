@@ -14,9 +14,13 @@ interface ReservationMemory {
   sentOpportunities: string[];
   lastUnhappyUrgency?: Urgency;
   lastUnhappyIssue?: string;
+  lastUnhappyOpenedAt?: string;  // מתי הבעיה נפתחה
   unhappySlackTs?: string;
+  manuallyResolved?: boolean;    // סגירה ידנית על ידי הצוות
+  manuallyResolvedAt?: string;
   wowSlackTs?: string;
   conversationMessages?: string;
+  conversationLastUpdated?: string; // מתי עודכנה השיחה לאחרונה
   guestName?: string;
   listingNickname?: string;
   country?: string;
@@ -38,7 +42,6 @@ async function getRecord(reservationId: string): Promise<ReservationMemory> {
 
 async function setRecord(reservationId: string, data: ReservationMemory): Promise<void> {
   try {
-    // שמירה ל-30 יום
     await redis.set(`res:${reservationId}`, data, { ex: 60 * 60 * 24 * 30 });
   } catch (err) {
     log.error(`Could not write to Redis for ${reservationId}`, { error: String(err) });
@@ -79,6 +82,20 @@ export async function getLastUnhappyIssue(reservationId: string): Promise<string
   return data.lastUnhappyIssue;
 }
 
+export async function isManuallyResolved(reservationId: string): Promise<boolean> {
+  const data = await getRecord(reservationId);
+  return data.manuallyResolved === true;
+}
+
+export async function markManuallyResolved(reservationId: string): Promise<void> {
+  const data = await getRecord(reservationId);
+  data.manuallyResolved = true;
+  data.manuallyResolvedAt = new Date().toISOString();
+  data.lastUnhappyUrgency = "resolved";
+  await setRecord(reservationId, data);
+  log.info(`Reservation ${reservationId} manually marked as resolved`);
+}
+
 export async function recordUnhappyAlert(
   reservationId: string,
   urgency: Urgency,
@@ -88,7 +105,18 @@ export async function recordUnhappyAlert(
   const data = await getRecord(reservationId);
   data.lastUnhappyUrgency = urgency;
   if (slackTs) data.unhappySlackTs = slackTs;
-  if (issue) data.lastUnhappyIssue = issue;
+  if (issue) {
+    data.lastUnhappyIssue = issue;
+    // שמור מתי הבעיה נפתחה — רק אם זו בעיה חדשה
+    if (!data.lastUnhappyOpenedAt || urgency === "resolved") {
+      data.lastUnhappyOpenedAt = new Date().toISOString();
+    }
+  }
+  // אם נסגר — אפס את הסגירה הידנית
+  if (urgency === "resolved") {
+    data.manuallyResolved = false;
+    data.lastUnhappyOpenedAt = undefined;
+  }
   await setRecord(reservationId, data);
   log.info(`Recorded unhappy alert for reservation ${reservationId} (urgency: ${urgency})`);
 }
@@ -121,6 +149,7 @@ export async function saveConversation(
 ): Promise<void> {
   const data = await getRecord(reservationId);
   data.conversationMessages = messages;
+  data.conversationLastUpdated = new Date().toISOString();
   data.guestName = meta.guestName;
   data.listingNickname = meta.listingNickname;
   data.country = meta.country;
@@ -131,7 +160,7 @@ export async function saveConversation(
   await setRecord(reservationId, data);
 }
 
-export async function getAllActiveConversations(): Promise<Array<{
+export async function getAllActiveConversations(sinceIso?: string): Promise<Array<{
   reservationId: string;
   messages: string;
   guestName: string;
@@ -141,6 +170,10 @@ export async function getAllActiveConversations(): Promise<Array<{
   checkOut: string;
   source: string;
   lastUpdated: string;
+  lastUnhappyUrgency?: Urgency;
+  lastUnhappyOpenedAt?: string;
+  manuallyResolved?: boolean;
+  conversationLastUpdated?: string;
 }>> {
   try {
     const keys = await redis.keys("res:*");
@@ -158,6 +191,11 @@ export async function getAllActiveConversations(): Promise<Array<{
         if (checkOut < twoDaysAgo) continue;
       }
 
+      // אם יש פילטר לפי זמן — רק שיחות שעודכנו מאז
+      if (sinceIso && data.conversationLastUpdated) {
+        if (new Date(data.conversationLastUpdated) <= new Date(sinceIso)) continue;
+      }
+
       const reservationId = key.replace("res:", "");
       results.push({
         reservationId,
@@ -169,6 +207,10 @@ export async function getAllActiveConversations(): Promise<Array<{
         checkOut: data.checkOut ?? "",
         source: data.source ?? "",
         lastUpdated: data.lastUpdated ?? "",
+        lastUnhappyUrgency: data.lastUnhappyUrgency,
+        lastUnhappyOpenedAt: data.lastUnhappyOpenedAt,
+        manuallyResolved: data.manuallyResolved,
+        conversationLastUpdated: data.conversationLastUpdated,
       });
     }
 
@@ -176,5 +218,25 @@ export async function getAllActiveConversations(): Promise<Array<{
   } catch (err) {
     log.error("Failed to get active conversations from Redis", { error: String(err) });
     return [];
+  }
+}
+
+// מפתח לשמירת שעת הדוח הערבי האחרון
+const LAST_EVENING_REPORT_KEY = "meta:lastEveningReport";
+
+export async function setLastEveningReportTime(): Promise<void> {
+  try {
+    await redis.set(LAST_EVENING_REPORT_KEY, new Date().toISOString());
+  } catch (err) {
+    log.error("Failed to save evening report time", { error: String(err) });
+  }
+}
+
+export async function getLastEveningReportTime(): Promise<string | null> {
+  try {
+    const val = await redis.get<string>(LAST_EVENING_REPORT_KEY);
+    return val ?? null;
+  } catch {
+    return null;
   }
 }

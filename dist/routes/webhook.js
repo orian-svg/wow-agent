@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.webhookHandler = webhookHandler;
 const logger_js_1 = require("../lib/logger.js");
@@ -235,6 +268,36 @@ async function webhookHandler(req, res) {
             const runWow = shouldRunWow(reservation);
             await handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment: true, runWow });
             return;
+        }
+        // האזנה לפקודת סגירה ידנית מסלאק
+        if (eventType === "event_callback") {
+            const slackEvent = event?.event ?? {};
+            if (slackEvent.type === "message" && slackEvent.text?.trim() === "!resolved" && slackEvent.thread_ts) {
+                // מחפשים הזמנה לפי thread_ts
+                const threadTs = slackEvent.thread_ts;
+                log.info(`Manual resolve command received for thread ${threadTs}`);
+                // מחפשים ב-Redis הזמנה עם ה-thread_ts הזה
+                const { getAllActiveConversations: getAll } = await Promise.resolve().then(() => __importStar(require("../lib/memory.js")));
+                const convs = await getAll();
+                const match = convs.find((c) => c.lastUnhappyUrgency !== undefined);
+                // שליפה ישירה לפי threadTs מה-Redis
+                const { Redis } = await Promise.resolve().then(() => __importStar(require("@upstash/redis")));
+                const redis = new Redis({
+                    url: process.env.UPSTASH_REDIS_REST_URL,
+                    token: process.env.UPSTASH_REDIS_REST_TOKEN,
+                });
+                const keys = await redis.keys("res:*");
+                for (const key of keys) {
+                    const data = await redis.get(key);
+                    if (data?.unhappySlackTs === threadTs) {
+                        const resId = key.replace("res:", "");
+                        await (0, memory_js_1.markManuallyResolved)(resId);
+                        log.info(`Reservation ${resId} manually resolved via Slack`);
+                        break;
+                    }
+                }
+                return;
+            }
         }
         log.info("Unknown event type, skipping", { eventType });
     }

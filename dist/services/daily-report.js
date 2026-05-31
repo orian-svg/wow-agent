@@ -18,13 +18,31 @@ function statusLabel(status) {
     if (status === "open")
         return "Open — needs attention";
     if (status === "resolved_uncertain")
-        return "Resolved — guest satisfaction unclear";
+        return "Resolved — satisfaction unclear";
     return "Resolved ✅";
+}
+function formatOpenedAt(isoString) {
+    if (!isoString)
+        return "";
+    try {
+        const d = new Date(isoString);
+        return d.toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+            timeZone: "Asia/Jerusalem",
+        });
+    }
+    catch {
+        return "";
+    }
 }
 function buildReportText(country, cases, totalStays, reportType, dateStr) {
     const header = reportType === "evening"
         ? `📋 *Daily Guest Report — ${country} | ${dateStr}*`
-        : `🌅 *Overnight Report — ${country} | ${dateStr} (23:00–07:00)*`;
+        : `🌅 *Overnight Report — ${country} | ${dateStr} (21:00–07:00)*`;
     if (cases.length === 0) {
         return `${header}\n\nNo issues flagged. All guests appear satisfied. ${MENTION}`;
     }
@@ -34,12 +52,10 @@ function buildReportText(country, cases, totalStays, reportType, dateStr) {
     const lines = [header, ""];
     for (const c of [...open, ...uncertain, ...confirmed]) {
         const emoji = urgencyEmoji(c.urgency);
-        lines.push(`${emoji} *${c.guestName}* — ${c.listingNickname}`);
+        const openedStr = c.openedAt ? ` _(opened ${formatOpenedAt(c.openedAt)})_` : "";
+        lines.push(`${emoji} *${c.guestName}* — ${c.listingNickname}${openedStr}`);
         lines.push(`Issue: ${c.issue}`);
         lines.push(`Status: ${statusLabel(c.status)}`);
-        if (c.actionNeeded && c.actionNeeded !== "None needed") {
-            lines.push(`Action needed: ${c.actionNeeded}`);
-        }
         lines.push("");
     }
     lines.push(`Total active stays: ${totalStays} | Issues flagged: ${cases.length} | Open: ${open.length} | Needs follow-up: ${uncertain.length} | Resolved: ${confirmed.length}`);
@@ -64,13 +80,27 @@ async function sendDailyReport(reportType) {
     log.info(`Sending ${reportType} report`);
     const dateStr = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
     try {
-        const conversations = await (0, memory_js_1.getAllActiveConversations)();
-        log.info(`Found ${conversations.length} active conversations in Redis`);
+        // דוח בוקר — רק שיחות שהתעדכנו מאז הדוח הערבי
+        let sinceIso;
+        if (reportType === "morning") {
+            const lastEvening = await (0, memory_js_1.getLastEveningReportTime)();
+            if (lastEvening) {
+                sinceIso = lastEvening;
+                log.info(`Morning report filtering since last evening report: ${lastEvening}`);
+            }
+        }
+        const conversations = await (0, memory_js_1.getAllActiveConversations)(sinceIso);
+        log.info(`Found ${conversations.length} conversations for ${reportType} report`);
         const israelCases = [];
         const athensCases = [];
         let israelTotal = 0;
         let athensTotal = 0;
         for (const conv of conversations) {
+            // דלג על שיחות שסומנו כנפתרות ידנית
+            if (conv.manuallyResolved) {
+                log.info(`Skipping ${conv.guestName} — manually resolved`);
+                continue;
+            }
             const isGreece = conv.country.toLowerCase() === "greece" || conv.country.toLowerCase() === "gr";
             if (isGreece)
                 athensTotal++;
@@ -80,6 +110,10 @@ async function sendDailyReport(reportType) {
             log.info(`Analysis for ${conv.guestName}: ${caseResult ? caseResult.status : "none"}`);
             if (!caseResult)
                 continue;
+            // הוסף תאריך פתיחה
+            if (conv.lastUnhappyOpenedAt) {
+                caseResult.openedAt = conv.lastUnhappyOpenedAt;
+            }
             if (isGreece) {
                 athensCases.push(caseResult);
             }
@@ -96,6 +130,10 @@ async function sendDailyReport(reportType) {
             const athensText = buildReportText("Athens", athensCases, athensTotal, reportType, dateStr);
             await postToSlack(config_js_1.config.slackChannelUnhappyAthens, athensText);
             log.info(`Athens report sent (${athensCases.length} cases)`);
+        }
+        // שמור את שעת הדוח הערבי
+        if (reportType === "evening") {
+            await (0, memory_js_1.setLastEveningReportTime)();
         }
     }
     catch (err) {
