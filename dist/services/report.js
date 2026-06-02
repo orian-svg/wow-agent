@@ -24,10 +24,12 @@ URGENCY:
 - medium: Issue exists but not immediately critical, or guest not yet checked in.
 - low: Minor friction, already partially addressed.
 
-OUTPUT ONLY this exact format:
+OUTPUT ONLY this exact format — no additional fields, no explanations, no action items:
 STATUS: open/resolved_uncertain/resolved_confirmed/none
 URGENCY: high/medium/low
-ISSUE: [one sentence describing the problem, or "None"]`;
+ISSUE: [one sentence describing the problem, or "None"]
+
+Do NOT include any ACTION, RECOMMENDATION, or any other field. Three lines only.`;
 async function analyzeGuestCase(guestName, listingNickname, messages) {
     try {
         const response = await client.messages.create({
