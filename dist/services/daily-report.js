@@ -110,6 +110,13 @@ async function sendDailyReport(reportType) {
             log.info(`Analysis for ${conv.guestName}: ${caseResult ? caseResult.status : "none"}`);
             if (!caseResult)
                 continue;
+            // דלג על מקרים שנסגרו לגמרי בדוח הערבי ולא היו הודעות חדשות
+            if (caseResult.status === "resolved_confirmed" &&
+                reportType === "morning" &&
+                !conv.conversationLastUpdated) {
+                log.info(`Skipping ${conv.guestName} — resolved_confirmed with no new messages`);
+                continue;
+            }
             // הוסף תאריך פתיחה
             if (conv.lastUnhappyOpenedAt) {
                 caseResult.openedAt = conv.lastUnhappyOpenedAt;

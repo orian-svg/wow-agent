@@ -191,9 +191,11 @@ export async function getAllActiveConversations(sinceIso?: string): Promise<Arra
         if (checkOut < twoDaysAgo) continue;
       }
 
-      // אם יש פילטר לפי זמן — רק שיחות שעודכנו מאז
+      // אם יש פילטר לפי זמן — רק שיחות שעודכנו מאז, או שיש להן בעיה פעילה
       if (sinceIso && data.conversationLastUpdated) {
-        if (new Date(data.conversationLastUpdated) <= new Date(sinceIso)) continue;
+        const hasActiveIssue = data.lastUnhappyUrgency && data.lastUnhappyUrgency !== "resolved";
+        const updatedAfter = new Date(data.conversationLastUpdated) > new Date(sinceIso);
+        if (!updatedAfter && !hasActiveIssue) continue;
       }
 
       const reservationId = key.replace("res:", "");

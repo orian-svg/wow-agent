@@ -34,7 +34,8 @@ STATUS: open/resolved_uncertain/resolved_confirmed/none
 URGENCY: high/medium/low
 ISSUE: [one sentence describing the problem, or "None"]
 
-Do NOT include any ACTION, RECOMMENDATION, or any other field. Three lines only.`;
+Do NOT include any ACTION, RECOMMENDATION, or any other field. Three lines only.
+Do NOT ask for more information. Analyze only what is provided. If information is insufficient, classify as "none".`;
 
 export async function analyzeGuestCase(
   guestName: string,
