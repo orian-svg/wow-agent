@@ -79,7 +79,7 @@ async function analyze(guestName, guestMessages, pastOpportunities = [], guestHi
         userContent += pastOpportunities.map((o, i) => `${i + 1}. ${o}`).join("\n");
     }
     const response = await client.messages.create({
-        model: "claude-haiku-4-5-20251001",
+        model: "claude-opus-4-8",
         max_tokens: 400,
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: userContent }],
