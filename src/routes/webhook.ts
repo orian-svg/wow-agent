@@ -1,28 +1,12 @@
 import type { Request, Response } from "express";
 import { createLogger } from "../lib/logger.js";
-import { getListing, getReservation, getConversation, getGuestHistory } from "../services/guesty.js";
-import { buildAlertParams, sendAlert, sendUnhappyAlert, sendUnhappyResolved } from "../services/slack.js";
-import { analyze } from "../services/analyzer.js";
-import { analyzeSentiment } from "../services/sentiment.js";
-import {
-  getPastOpportunities,
-  recordOpportunity,
-  getLastUnhappyUrgency,
-  getLastUnhappyIssue,
-  getUnhappyThreadTs,
-  recordUnhappyAlert,
-  getWowThreadTs,
-  recordWowAlert,
-  saveConversation,
-  markManuallyResolved,
-  URGENCY_RANK,
-} from "../lib/memory.js";
-import type { Urgency } from "../lib/memory.js";
-import type { GuestyMessage, WebhookContext } from "../types.js";
+import { getListing, getReservation, getConversation } from "../services/guesty.js";
+import { handleWow, shouldRunWow } from "../services/wow-agent.js";
+import { handleUnhappy } from "../services/unhappy-agent.js";
+import { saveConversation, markManuallyResolved } from "../lib/memory.js";
+import type { GuestyMessage } from "../types.js";
 
 const log = createLogger("webhook");
-
-const INQUIRY_SOURCES = ["airbnb", "airbnb2", "vrbo"];
 
 function formatStatus(status: string, isReturningGuest: boolean): string {
   if (isReturningGuest) return "Returning Guest";
@@ -35,24 +19,6 @@ function formatStatus(status: string, isReturningGuest: boolean): string {
     cancelled: "Cancelled",
   };
   return map[status.toLowerCase()] ?? status;
-}
-
-function isInquiryStatus(status: string): boolean {
-  return ["inquiry", "reserved", "pending"].includes(status.toLowerCase());
-}
-
-function isInquirySource(source: string): boolean {
-  return INQUIRY_SOURCES.includes(source.toLowerCase());
-}
-
-function shouldRunWow(reservation: {
-  status: string;
-  source: string;
-  isReturningGuest: boolean;
-}): boolean {
-  if (reservation.isReturningGuest) return true;
-  if (isInquiryStatus(reservation.status) && isInquirySource(reservation.source)) return false;
-  return true;
 }
 
 function extractMessagesFromThread(thread: GuestyMessage[]): string {
@@ -96,141 +62,6 @@ function wasJustConfirmed(event: any): boolean {
   return wasInquiry && isNowConfirmed;
 }
 
-async function handleAnalysis({
-  reservationId,
-  guestMessages,
-  messageCount,
-  reservation,
-  listing,
-  status,
-  runSentiment,
-  runWow,
-}: {
-  reservationId: string;
-  guestMessages: string;
-  messageCount: number;
-  reservation: { guestId: string; guestName: string; checkIn: string; checkOut: string; source: string; status: string; isReturningGuest: boolean; totalPrice: number };
-  listing: { country: string; title: string } | null;
-  status: string;
-  runSentiment: boolean;
-  runWow: boolean;
-}): Promise<void> {
-  // שמור שיחה ב-Redis
-  if (guestMessages) {
-    await saveConversation(reservationId, guestMessages, {
-      guestName: reservation.guestName,
-      listingNickname: listing?.title ?? "Unknown",
-      country: listing?.country ?? "",
-      checkIn: reservation.checkIn,
-      checkOut: reservation.checkOut,
-      source: reservation.source,
-    });
-    log.info(`Conversation saved for ${reservation.guestName} (${reservationId})`);
-  }
-
-  const pastOpportunities = await getPastOpportunities(reservationId);
-
-  let guestHistory = "";
-  if (reservation.guestId) {
-    guestHistory = await getGuestHistory(reservation.guestId);
-    if (guestHistory) {
-      log.info(`Guest history loaded for ${reservation.guestName} (${guestHistory.length} chars)`);
-    }
-  }
-
-  const promises: Promise<void>[] = [];
-
-  if (runWow) {
-    promises.push(
-      analyze(reservation.guestName, guestMessages, pastOpportunities, guestHistory).then(async (analysis) => {
-        log.info("WOW analysis result", { isOpportunity: analysis.isOpportunity });
-        if (!analysis.isOpportunity) return;
-
-        const alertParams = buildAlertParams({
-          country: listing?.country ?? "",
-          guestName: reservation.guestName,
-          listingTitle: listing?.title ?? "Unknown",
-          checkIn: reservation.checkIn,
-          checkOut: reservation.checkOut,
-          source: reservation.source,
-          status,
-          material: analysis.material,
-          personal: analysis.personal,
-          why: analysis.why,
-        });
-
-        await sendAlert(alertParams);
-        await recordOpportunity(reservationId, analysis.why);
-      })
-    );
-  } else {
-    log.info(`WOW skipped — inquiry status from ${reservation.source}`);
-  }
-
-  if (runSentiment) {
-    promises.push(
-      analyzeSentiment(reservation.guestName, guestMessages, messageCount, reservation.checkIn, reservation.checkOut, reservation.totalPrice).then(async (sentiment) => {
-        log.info("Sentiment analysis result", { isUnhappy: sentiment.isUnhappy, urgency: sentiment.urgency });
-
-        const lastUrgency = await getLastUnhappyUrgency(reservationId);
-        const threadTs = await getUnhappyThreadTs(reservationId);
-        const newUrgency: Urgency = sentiment.isUnhappy ? sentiment.urgency : "resolved";
-        const newRank = URGENCY_RANK[newUrgency];
-        const lastRank = lastUrgency !== undefined ? URGENCY_RANK[lastUrgency] : undefined;
-
-        if (!sentiment.isUnhappy && lastUrgency === undefined) return;
-
-        if (sentiment.isUnhappy && sentiment.urgency === "high") {
-          // High חדש — בודקים אם הבעיה שונה מהקודמת
-          const lastIssue = await getLastUnhappyIssue(reservationId);
-          const isSameIssue = lastIssue && sentiment.issue &&
-            lastIssue.toLowerCase().substring(0, 60) === sentiment.issue.toLowerCase().substring(0, 60);
-
-          if (isSameIssue) {
-            log.info(`Same High issue already reported — skipping duplicate alert`);
-            return;
-          }
-
-          const isAdditionalIssue = lastUrgency === "high";
-          const ts = await sendUnhappyAlert({
-            country: listing?.country ?? "",
-            guestName: reservation.guestName,
-            listingTitle: listing?.title ?? "Unknown",
-            checkIn: reservation.checkIn,
-            checkOut: reservation.checkOut,
-            source: reservation.source,
-            messageCount,
-            sentiment,
-            threadTs: undefined,
-            isAdditionalIssue,
-          });
-          await recordUnhappyAlert(reservationId, newUrgency, ts, sentiment.issue);
-          return;
-        }
-
-        if (sentiment.isUnhappy && (lastRank === undefined || newRank > lastRank)) {
-          await recordUnhappyAlert(reservationId, newUrgency, undefined, sentiment.issue);
-          log.info(`Urgency ${sentiment.urgency} — saved for daily report, no real-time alert`);
-          return;
-        }
-
-        if (lastUrgency !== undefined && newRank < lastRank! && threadTs) {
-          await sendUnhappyResolved({
-            country: listing?.country ?? "",
-            guestName: reservation.guestName,
-            isFullyResolved: !sentiment.isUnhappy,
-            newUrgency: sentiment.isUnhappy ? sentiment.urgency : undefined,
-            threadTs,
-          });
-          await recordUnhappyAlert(reservationId, newUrgency);
-        }
-      })
-    );
-  }
-
-  await Promise.all(promises);
-}
-
 export async function webhookHandler(req: Request, res: Response): Promise<void> {
   res.sendStatus(200);
 
@@ -249,13 +80,14 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
       return;
     }
 
+    // הזמנה שאושרה זה עתה — WOW בלבד
     if (eventType === "reservation.updated") {
       if (!wasJustConfirmed(event)) {
         log.info("reservation.updated but not a confirmation transition, skipping");
         return;
       }
 
-      log.info("Reservation just confirmed — analyzing full conversation");
+      log.info("Reservation just confirmed — running WOW analysis");
 
       const reservation = await getReservation(reservationId);
       if (!reservation) return;
@@ -272,7 +104,6 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
         return;
       }
 
-      const messageCount = countGuestMessages(thread);
       const listing = reservation.listingId ? await getListing(reservation.listingId) : null;
       const status = formatStatus(reservation.status, reservation.isReturningGuest);
 
@@ -283,14 +114,23 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
         status,
       });
 
-      await handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment: false, runWow: true });
+      await saveConversation(reservationId, guestMessages, {
+        guestName: reservation.guestName,
+        listingNickname: listing?.title ?? "Unknown",
+        country: listing?.country ?? "",
+        checkIn: reservation.checkIn,
+        checkOut: reservation.checkOut,
+        source: reservation.source,
+      });
+
+      await handleWow({ reservationId, guestMessages, reservation, listing, status });
       return;
     }
 
+    // הודעה נכנסת — WOW + Unhappy
     if (eventType === "reservation.messageReceived") {
       const conversation = event?.conversation ?? {};
       const thread: GuestyMessage[] = conversation.thread ?? [];
-
       const guestMessages = extractMessagesFromThread(thread);
 
       if (!guestMessages) {
@@ -313,43 +153,30 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
         isReturningGuest: reservation.isReturningGuest,
       });
 
-      const runWow = shouldRunWow(reservation);
+      // שמור שיחה ב-Redis
+      await saveConversation(reservationId, guestMessages, {
+        guestName: reservation.guestName,
+        listingNickname: listing?.title ?? "Unknown",
+        country: listing?.country ?? "",
+        checkIn: reservation.checkIn,
+        checkOut: reservation.checkOut,
+        source: reservation.source,
+      });
+      log.info(`Conversation saved for ${reservation.guestName} (${reservationId})`);
 
-      await handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment: true, runWow });
-      return;
-    }
+      // הרץ WOW ו-Unhappy במקביל — כל אחד בעולם שלו
+      const tasks: Promise<void>[] = [];
 
-    // האזנה לפקודת סגירה ידנית מסלאק
-    if (eventType === "event_callback") {
-      const slackEvent = event?.event ?? {};
-      if (slackEvent.type === "message" && slackEvent.text?.trim() === "!resolved" && slackEvent.thread_ts) {
-        // מחפשים הזמנה לפי thread_ts
-        const threadTs = slackEvent.thread_ts;
-        log.info(`Manual resolve command received for thread ${threadTs}`);
-
-        // מחפשים ב-Redis הזמנה עם ה-thread_ts הזה
-        const { getAllActiveConversations: getAll } = await import("../lib/memory.js");
-        const convs = await getAll();
-        const match = convs.find((c) => c.lastUnhappyUrgency !== undefined);
-
-        // שליפה ישירה לפי threadTs מה-Redis
-        const { Redis } = await import("@upstash/redis");
-        const redis = new Redis({
-          url: process.env.UPSTASH_REDIS_REST_URL!,
-          token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-        });
-        const keys = await redis.keys("res:*");
-        for (const key of keys) {
-          const data = await redis.get<any>(key);
-          if (data?.unhappySlackTs === threadTs) {
-            const resId = key.replace("res:", "");
-            await markManuallyResolved(resId);
-            log.info(`Reservation ${resId} manually resolved via Slack`);
-            break;
-          }
-        }
-        return;
+      if (shouldRunWow(reservation)) {
+        tasks.push(handleWow({ reservationId, guestMessages, reservation, listing, status }));
+      } else {
+        log.info(`WOW skipped — inquiry status from ${reservation.source}`);
       }
+
+      tasks.push(handleUnhappy({ reservationId, guestMessages, messageCount, reservation, listing }));
+
+      await Promise.all(tasks);
+      return;
     }
 
     log.info("Unknown event type, skipping", { eventType });

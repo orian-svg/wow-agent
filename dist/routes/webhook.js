@@ -1,47 +1,12 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.webhookHandler = webhookHandler;
 const logger_js_1 = require("../lib/logger.js");
 const guesty_js_1 = require("../services/guesty.js");
-const slack_js_1 = require("../services/slack.js");
-const analyzer_js_1 = require("../services/analyzer.js");
-const sentiment_js_1 = require("../services/sentiment.js");
+const wow_agent_js_1 = require("../services/wow-agent.js");
+const unhappy_agent_js_1 = require("../services/unhappy-agent.js");
 const memory_js_1 = require("../lib/memory.js");
 const log = (0, logger_js_1.createLogger)("webhook");
-const INQUIRY_SOURCES = ["airbnb", "airbnb2", "vrbo"];
 function formatStatus(status, isReturningGuest) {
     if (isReturningGuest)
         return "Returning Guest";
@@ -54,19 +19,6 @@ function formatStatus(status, isReturningGuest) {
         cancelled: "Cancelled",
     };
     return map[status.toLowerCase()] ?? status;
-}
-function isInquiryStatus(status) {
-    return ["inquiry", "reserved", "pending"].includes(status.toLowerCase());
-}
-function isInquirySource(source) {
-    return INQUIRY_SOURCES.includes(source.toLowerCase());
-}
-function shouldRunWow(reservation) {
-    if (reservation.isReturningGuest)
-        return true;
-    if (isInquiryStatus(reservation.status) && isInquirySource(reservation.source))
-        return false;
-    return true;
 }
 function extractMessagesFromThread(thread) {
     return thread
@@ -101,106 +53,6 @@ function wasJustConfirmed(event) {
     const isNowConfirmed = newStatus.toLowerCase() === "confirmed";
     return wasInquiry && isNowConfirmed;
 }
-async function handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment, runWow, }) {
-    // שמור שיחה ב-Redis
-    if (guestMessages) {
-        await (0, memory_js_1.saveConversation)(reservationId, guestMessages, {
-            guestName: reservation.guestName,
-            listingNickname: listing?.title ?? "Unknown",
-            country: listing?.country ?? "",
-            checkIn: reservation.checkIn,
-            checkOut: reservation.checkOut,
-            source: reservation.source,
-        });
-        log.info(`Conversation saved for ${reservation.guestName} (${reservationId})`);
-    }
-    const pastOpportunities = await (0, memory_js_1.getPastOpportunities)(reservationId);
-    let guestHistory = "";
-    if (reservation.guestId) {
-        guestHistory = await (0, guesty_js_1.getGuestHistory)(reservation.guestId);
-        if (guestHistory) {
-            log.info(`Guest history loaded for ${reservation.guestName} (${guestHistory.length} chars)`);
-        }
-    }
-    const promises = [];
-    if (runWow) {
-        promises.push((0, analyzer_js_1.analyze)(reservation.guestName, guestMessages, pastOpportunities, guestHistory).then(async (analysis) => {
-            log.info("WOW analysis result", { isOpportunity: analysis.isOpportunity });
-            if (!analysis.isOpportunity)
-                return;
-            const alertParams = (0, slack_js_1.buildAlertParams)({
-                country: listing?.country ?? "",
-                guestName: reservation.guestName,
-                listingTitle: listing?.title ?? "Unknown",
-                checkIn: reservation.checkIn,
-                checkOut: reservation.checkOut,
-                source: reservation.source,
-                status,
-                material: analysis.material,
-                personal: analysis.personal,
-                why: analysis.why,
-            });
-            await (0, slack_js_1.sendAlert)(alertParams);
-            await (0, memory_js_1.recordOpportunity)(reservationId, analysis.why);
-        }));
-    }
-    else {
-        log.info(`WOW skipped — inquiry status from ${reservation.source}`);
-    }
-    if (runSentiment) {
-        promises.push((0, sentiment_js_1.analyzeSentiment)(reservation.guestName, guestMessages, messageCount, reservation.checkIn, reservation.checkOut, reservation.totalPrice).then(async (sentiment) => {
-            log.info("Sentiment analysis result", { isUnhappy: sentiment.isUnhappy, urgency: sentiment.urgency });
-            const lastUrgency = await (0, memory_js_1.getLastUnhappyUrgency)(reservationId);
-            const threadTs = await (0, memory_js_1.getUnhappyThreadTs)(reservationId);
-            const newUrgency = sentiment.isUnhappy ? sentiment.urgency : "resolved";
-            const newRank = memory_js_1.URGENCY_RANK[newUrgency];
-            const lastRank = lastUrgency !== undefined ? memory_js_1.URGENCY_RANK[lastUrgency] : undefined;
-            if (!sentiment.isUnhappy && lastUrgency === undefined)
-                return;
-            if (sentiment.isUnhappy && sentiment.urgency === "high") {
-                // High חדש — בודקים אם הבעיה שונה מהקודמת
-                const lastIssue = await (0, memory_js_1.getLastUnhappyIssue)(reservationId);
-                const isSameIssue = lastIssue && sentiment.issue &&
-                    lastIssue.toLowerCase().substring(0, 60) === sentiment.issue.toLowerCase().substring(0, 60);
-                if (isSameIssue) {
-                    log.info(`Same High issue already reported — skipping duplicate alert`);
-                    return;
-                }
-                const isAdditionalIssue = lastUrgency === "high";
-                const ts = await (0, slack_js_1.sendUnhappyAlert)({
-                    country: listing?.country ?? "",
-                    guestName: reservation.guestName,
-                    listingTitle: listing?.title ?? "Unknown",
-                    checkIn: reservation.checkIn,
-                    checkOut: reservation.checkOut,
-                    source: reservation.source,
-                    messageCount,
-                    sentiment,
-                    threadTs: undefined,
-                    isAdditionalIssue,
-                });
-                await (0, memory_js_1.recordUnhappyAlert)(reservationId, newUrgency, ts, sentiment.issue);
-                return;
-            }
-            if (sentiment.isUnhappy && (lastRank === undefined || newRank > lastRank)) {
-                await (0, memory_js_1.recordUnhappyAlert)(reservationId, newUrgency, undefined, sentiment.issue);
-                log.info(`Urgency ${sentiment.urgency} — saved for daily report, no real-time alert`);
-                return;
-            }
-            if (lastUrgency !== undefined && newRank < lastRank && threadTs) {
-                await (0, slack_js_1.sendUnhappyResolved)({
-                    country: listing?.country ?? "",
-                    guestName: reservation.guestName,
-                    isFullyResolved: !sentiment.isUnhappy,
-                    newUrgency: sentiment.isUnhappy ? sentiment.urgency : undefined,
-                    threadTs,
-                });
-                await (0, memory_js_1.recordUnhappyAlert)(reservationId, newUrgency);
-            }
-        }));
-    }
-    await Promise.all(promises);
-}
 async function webhookHandler(req, res) {
     res.sendStatus(200);
     try {
@@ -214,12 +66,13 @@ async function webhookHandler(req, res) {
             log.info("No reservationId found, skipping");
             return;
         }
+        // הזמנה שאושרה זה עתה — WOW בלבד
         if (eventType === "reservation.updated") {
             if (!wasJustConfirmed(event)) {
                 log.info("reservation.updated but not a confirmation transition, skipping");
                 return;
             }
-            log.info("Reservation just confirmed — analyzing full conversation");
+            log.info("Reservation just confirmed — running WOW analysis");
             const reservation = await (0, guesty_js_1.getReservation)(reservationId);
             if (!reservation)
                 return;
@@ -232,7 +85,6 @@ async function webhookHandler(req, res) {
                 log.info("No guest messages found in confirmed reservation, skipping");
                 return;
             }
-            const messageCount = countGuestMessages(thread);
             const listing = reservation.listingId ? await (0, guesty_js_1.getListing)(reservation.listingId) : null;
             const status = formatStatus(reservation.status, reservation.isReturningGuest);
             log.info("Context resolved", {
@@ -241,9 +93,18 @@ async function webhookHandler(req, res) {
                 country: listing?.country ?? "",
                 status,
             });
-            await handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment: false, runWow: true });
+            await (0, memory_js_1.saveConversation)(reservationId, guestMessages, {
+                guestName: reservation.guestName,
+                listingNickname: listing?.title ?? "Unknown",
+                country: listing?.country ?? "",
+                checkIn: reservation.checkIn,
+                checkOut: reservation.checkOut,
+                source: reservation.source,
+            });
+            await (0, wow_agent_js_1.handleWow)({ reservationId, guestMessages, reservation, listing, status });
             return;
         }
+        // הודעה נכנסת — WOW + Unhappy
         if (eventType === "reservation.messageReceived") {
             const conversation = event?.conversation ?? {};
             const thread = conversation.thread ?? [];
@@ -265,39 +126,27 @@ async function webhookHandler(req, res) {
                 status,
                 isReturningGuest: reservation.isReturningGuest,
             });
-            const runWow = shouldRunWow(reservation);
-            await handleAnalysis({ reservationId, guestMessages, messageCount, reservation, listing, status, runSentiment: true, runWow });
-            return;
-        }
-        // האזנה לפקודת סגירה ידנית מסלאק
-        if (eventType === "event_callback") {
-            const slackEvent = event?.event ?? {};
-            if (slackEvent.type === "message" && slackEvent.text?.trim() === "!resolved" && slackEvent.thread_ts) {
-                // מחפשים הזמנה לפי thread_ts
-                const threadTs = slackEvent.thread_ts;
-                log.info(`Manual resolve command received for thread ${threadTs}`);
-                // מחפשים ב-Redis הזמנה עם ה-thread_ts הזה
-                const { getAllActiveConversations: getAll } = await Promise.resolve().then(() => __importStar(require("../lib/memory.js")));
-                const convs = await getAll();
-                const match = convs.find((c) => c.lastUnhappyUrgency !== undefined);
-                // שליפה ישירה לפי threadTs מה-Redis
-                const { Redis } = await Promise.resolve().then(() => __importStar(require("@upstash/redis")));
-                const redis = new Redis({
-                    url: process.env.UPSTASH_REDIS_REST_URL,
-                    token: process.env.UPSTASH_REDIS_REST_TOKEN,
-                });
-                const keys = await redis.keys("res:*");
-                for (const key of keys) {
-                    const data = await redis.get(key);
-                    if (data?.unhappySlackTs === threadTs) {
-                        const resId = key.replace("res:", "");
-                        await (0, memory_js_1.markManuallyResolved)(resId);
-                        log.info(`Reservation ${resId} manually resolved via Slack`);
-                        break;
-                    }
-                }
-                return;
+            // שמור שיחה ב-Redis
+            await (0, memory_js_1.saveConversation)(reservationId, guestMessages, {
+                guestName: reservation.guestName,
+                listingNickname: listing?.title ?? "Unknown",
+                country: listing?.country ?? "",
+                checkIn: reservation.checkIn,
+                checkOut: reservation.checkOut,
+                source: reservation.source,
+            });
+            log.info(`Conversation saved for ${reservation.guestName} (${reservationId})`);
+            // הרץ WOW ו-Unhappy במקביל — כל אחד בעולם שלו
+            const tasks = [];
+            if ((0, wow_agent_js_1.shouldRunWow)(reservation)) {
+                tasks.push((0, wow_agent_js_1.handleWow)({ reservationId, guestMessages, reservation, listing, status }));
             }
+            else {
+                log.info(`WOW skipped — inquiry status from ${reservation.source}`);
+            }
+            tasks.push((0, unhappy_agent_js_1.handleUnhappy)({ reservationId, guestMessages, messageCount, reservation, listing }));
+            await Promise.all(tasks);
+            return;
         }
         log.info("Unknown event type, skipping", { eventType });
     }
