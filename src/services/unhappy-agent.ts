@@ -1,3 +1,4 @@
+import Anthropic from "@anthropic-ai/sdk";
 import { createLogger } from "../lib/logger.js";
 import { sendUnhappyAlert, sendUnhappyResolved } from "./slack.js";
 import { analyzeSentiment } from "./sentiment.js";
@@ -8,9 +9,31 @@ import {
   recordUnhappyAlert,
   URGENCY_RANK,
 } from "../lib/memory.js";
+import { config } from "../config.js";
 import type { Urgency } from "../lib/memory.js";
 
 const log = createLogger("unhappy-agent");
+const client = new Anthropic({ apiKey: config.anthropicApiKey });
+
+async function isSameIssue(previousIssue: string, newIssue: string): Promise<boolean> {
+  if (!previousIssue || !newIssue) return false;
+
+  const response = await client.messages.create({
+    model: "claude-opus-4-8",
+    max_tokens: 50,
+    system: `You are comparing two guest complaint descriptions to determine if they are about the same underlying problem.
+Answer only YES or NO.
+YES = same root problem, even if described differently or with new details.
+NO = clearly different problem.`,
+    messages: [{
+      role: "user",
+      content: `Previous issue: ${previousIssue}\nNew issue: ${newIssue}\nSame problem?`
+    }],
+  });
+
+  const text = response.content[0]?.type === "text" ? response.content[0].text : "";
+  return /^\s*yes/i.test(text);
+}
 
 export async function handleUnhappy({
   reservationId,
@@ -46,12 +69,13 @@ export async function handleUnhappy({
 
   if (sentiment.isUnhappy && sentiment.urgency === "high") {
     const lastIssue = await getLastUnhappyIssue(reservationId);
-    const isSameIssue = lastIssue && sentiment.issue &&
-      lastIssue.toLowerCase().substring(0, 60) === sentiment.issue.toLowerCase().substring(0, 60);
 
-    if (isSameIssue) {
-      log.info(`Same High issue already reported — skipping duplicate alert`);
-      return;
+    if (lastIssue && lastUrgency === "high") {
+      const same = await isSameIssue(lastIssue, sentiment.issue);
+      if (same) {
+        log.info(`Same High issue already reported — skipping duplicate alert`);
+        return;
+      }
     }
 
     const isAdditionalIssue = lastUrgency === "high";
