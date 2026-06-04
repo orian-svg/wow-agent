@@ -3,6 +3,7 @@ import { config } from "./config.js";
 import { createLogger } from "./lib/logger.js";
 import { webhookHandler } from "./routes/webhook.js";
 import { healthHandler } from "./routes/health.js";
+import { slackEventsHandler } from "./routes/slack-events.js";
 import { sendDailyReport } from "./services/daily-report.js";
 
 const log = createLogger("server");
@@ -33,6 +34,7 @@ export function createServer() {
   app.use(express.json({ limit: "2mb" }));
 
   app.post("/webhook", webhookHandler);
+  app.post("/slack/events", slackEventsHandler);
   app.get("/health", healthHandler);
 
   return app;
