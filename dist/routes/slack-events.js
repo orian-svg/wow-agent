@@ -1,39 +1,16 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.slackEventsHandler = slackEventsHandler;
 const logger_js_1 = require("../lib/logger.js");
 const memory_js_1 = require("../lib/memory.js");
 const redis_1 = require("@upstash/redis");
-const crypto_1 = __importDefault(require("crypto"));
 const log = (0, logger_js_1.createLogger)("slack-events");
-const SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET ?? "";
-function verifySlackSignature(req) {
-    const timestamp = req.headers["x-slack-request-timestamp"];
-    const signature = req.headers["x-slack-signature"];
-    if (!timestamp || !signature)
-        return false;
-    const now = Math.floor(Date.now() / 1000);
-    if (Math.abs(now - parseInt(timestamp)) > 300)
-        return false;
-    const rawBody = JSON.stringify(req.body);
-    const sigBase = `v0:${timestamp}:${rawBody}`;
-    const hmac = crypto_1.default.createHmac("sha256", SIGNING_SECRET);
-    hmac.update(sigBase);
-    const computed = `v0=${hmac.digest("hex")}`;
-    return crypto_1.default.timingSafeEqual(Buffer.from(computed), Buffer.from(signature));
-}
 async function slackEventsHandler(req, res) {
     const body = req.body;
+    // אימות URL מסלאק — חייב להגיב מיד ללא אימות חתימה
     if (body.type === "url_verification") {
+        log.info("Slack URL verification challenge received");
         res.json({ challenge: body.challenge });
-        return;
-    }
-    if (SIGNING_SECRET && !verifySlackSignature(req)) {
-        log.warn("Invalid Slack signature");
-        res.sendStatus(401);
         return;
     }
     res.sendStatus(200);

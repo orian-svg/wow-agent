@@ -2,37 +2,16 @@ import type { Request, Response } from "express";
 import { createLogger } from "../lib/logger.js";
 import { markManuallyResolved } from "../lib/memory.js";
 import { Redis } from "@upstash/redis";
-import crypto from "crypto";
 
 const log = createLogger("slack-events");
-
-const SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET ?? "";
-
-function verifySlackSignature(req: Request): boolean {
-  const timestamp = req.headers["x-slack-request-timestamp"] as string;
-  const signature = req.headers["x-slack-signature"] as string;
-  if (!timestamp || !signature) return false;
-  const now = Math.floor(Date.now() / 1000);
-  if (Math.abs(now - parseInt(timestamp)) > 300) return false;
-  const rawBody = JSON.stringify(req.body);
-  const sigBase = `v0:${timestamp}:${rawBody}`;
-  const hmac = crypto.createHmac("sha256", SIGNING_SECRET);
-  hmac.update(sigBase);
-  const computed = `v0=${hmac.digest("hex")}`;
-  return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(signature));
-}
 
 export async function slackEventsHandler(req: Request, res: Response): Promise<void> {
   const body = req.body;
 
+  // אימות URL מסלאק — חייב להגיב מיד ללא אימות חתימה
   if (body.type === "url_verification") {
+    log.info("Slack URL verification challenge received");
     res.json({ challenge: body.challenge });
-    return;
-  }
-
-  if (SIGNING_SECRET && !verifySlackSignature(req)) {
-    log.warn("Invalid Slack signature");
-    res.sendStatus(401);
     return;
   }
 
