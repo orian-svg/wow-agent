@@ -14,12 +14,30 @@ function urgencyEmoji(urgency) {
         return "🟡";
     return "🟢";
 }
-function statusLabel(status) {
-    if (status === "open")
-        return "Open — needs attention";
+function statusLabel(status, daysOpen) {
+    if (status === "open") {
+        if (daysOpen === 0)
+            return "Open — awaiting team response";
+        if (daysOpen === 1)
+            return "Open — unresolved since yesterday";
+        return `Open — unresolved for ${daysOpen} days`;
+    }
     if (status === "resolved_uncertain")
-        return "Resolved — satisfaction unclear";
+        return "Resolved — guest satisfaction unclear, follow up recommended";
     return "Resolved ✅";
+}
+function getDaysOpen(openedAt) {
+    if (!openedAt)
+        return 0;
+    try {
+        const opened = new Date(openedAt);
+        const now = new Date();
+        const diff = Math.floor((now.getTime() - opened.getTime()) / (1000 * 60 * 60 * 24));
+        return Math.max(0, diff);
+    }
+    catch {
+        return 0;
+    }
 }
 function formatOpenedAt(isoString) {
     if (!isoString)
@@ -53,9 +71,10 @@ function buildReportText(country, cases, totalStays, reportType, dateStr) {
     for (const c of [...open, ...uncertain, ...confirmed]) {
         const emoji = urgencyEmoji(c.urgency);
         const openedStr = c.openedAt ? ` _(opened ${formatOpenedAt(c.openedAt)})_` : "";
+        const daysOpen = getDaysOpen(c.openedAt);
         lines.push(`${emoji} *${c.guestName}* — ${c.listingNickname}${openedStr}`);
         lines.push(`Issue: ${c.issue}`);
-        lines.push(`Status: ${statusLabel(c.status)}`);
+        lines.push(`Status: ${statusLabel(c.status, daysOpen)}`);
         lines.push("");
     }
     lines.push(`Total active stays: ${totalStays} | Issues flagged: ${cases.length} | Open: ${open.length} | Needs follow-up: ${uncertain.length} | Resolved: ${confirmed.length}`);
@@ -80,7 +99,6 @@ async function sendDailyReport(reportType) {
     log.info(`Sending ${reportType} report`);
     const dateStr = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
     try {
-        // דוח בוקר — רק שיחות שהתעדכנו מאז הדוח הערבי
         let sinceIso;
         if (reportType === "morning") {
             const lastEvening = await (0, memory_js_1.getLastEveningReportTime)();
@@ -93,31 +111,36 @@ async function sendDailyReport(reportType) {
         log.info(`Found ${conversations.length} conversations for ${reportType} report`);
         const israelCases = [];
         const athensCases = [];
+        // ספירת שהיות פעילות אמיתיות — רק confirmed שלא עברו checkout
+        const now = new Date();
         let israelTotal = 0;
         let athensTotal = 0;
         for (const conv of conversations) {
-            // דלג על שיחות שסומנו כנפתרות ידנית
+            // דלג על ביטולים וכן על שיחות שסומנו ידנית כנפתרות
             if (conv.manuallyResolved) {
                 log.info(`Skipping ${conv.guestName} — manually resolved`);
                 continue;
             }
+            // ספור רק הזמנות פעילות — לא checkout שעבר יותר מיום
+            const checkOutDate = conv.checkOut ? new Date(conv.checkOut) : null;
+            const isActiveStay = !checkOutDate || checkOutDate >= new Date(now.getTime() - 24 * 60 * 60 * 1000);
             const isGreece = conv.country.toLowerCase() === "greece" || conv.country.toLowerCase() === "gr";
-            if (isGreece)
-                athensTotal++;
-            else
-                israelTotal++;
+            if (isActiveStay) {
+                if (isGreece)
+                    athensTotal++;
+                else
+                    israelTotal++;
+            }
             const caseResult = await (0, report_js_1.analyzeGuestCase)(conv.guestName, conv.listingNickname, conv.messages);
             log.info(`Analysis for ${conv.guestName}: ${caseResult ? caseResult.status : "none"}`);
             if (!caseResult)
                 continue;
-            // דלג על מקרים שנסגרו לגמרי בדוח הערבי ולא היו הודעות חדשות
             if (caseResult.status === "resolved_confirmed" &&
                 reportType === "morning" &&
                 !conv.conversationLastUpdated) {
                 log.info(`Skipping ${conv.guestName} — resolved_confirmed with no new messages`);
                 continue;
             }
-            // הוסף תאריך פתיחה
             if (conv.lastUnhappyOpenedAt) {
                 caseResult.openedAt = conv.lastUnhappyOpenedAt;
             }
@@ -138,7 +161,6 @@ async function sendDailyReport(reportType) {
             await postToSlack(config_js_1.config.slackChannelUnhappyAthens, athensText);
             log.info(`Athens report sent (${athensCases.length} cases)`);
         }
-        // שמור את שעת הדוח הערבי
         if (reportType === "evening") {
             await (0, memory_js_1.setLastEveningReportTime)();
         }
