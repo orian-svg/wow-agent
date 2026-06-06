@@ -57,6 +57,15 @@ function formatOpenedAt(isoString) {
         return "";
     }
 }
+function shortTitle(issue, status) {
+    if (status === "resolved_confirmed")
+        return "✅ Resolved";
+    if (status === "resolved_uncertain")
+        return "⚠️ Resolved — follow up needed";
+    // מחלץ 4-5 מילים ראשונות מהבעיה ככותרת
+    const words = issue.split(" ").slice(0, 5).join(" ");
+    return words.length < issue.length ? `${words}...` : words;
+}
 function buildReportText(country, cases, totalStays, reportType, dateStr) {
     const header = reportType === "evening"
         ? `📋 *Daily Guest Report — ${country} | ${dateStr}*`
@@ -72,7 +81,9 @@ function buildReportText(country, cases, totalStays, reportType, dateStr) {
         const emoji = urgencyEmoji(c.urgency);
         const openedStr = c.openedAt ? ` _(opened ${formatOpenedAt(c.openedAt)})_` : "";
         const daysOpen = getDaysOpen(c.openedAt);
+        const title = shortTitle(c.issue, c.status);
         lines.push(`${emoji} *${c.guestName}* — ${c.listingNickname}${openedStr}`);
+        lines.push(`*${title}*`);
         lines.push(`Issue: ${c.issue}`);
         lines.push(`Status: ${statusLabel(c.status, daysOpen)}`);
         lines.push("");
@@ -111,17 +122,14 @@ async function sendDailyReport(reportType) {
         log.info(`Found ${conversations.length} conversations for ${reportType} report`);
         const israelCases = [];
         const athensCases = [];
-        // ספירת שהיות פעילות אמיתיות — רק confirmed שלא עברו checkout
         const now = new Date();
         let israelTotal = 0;
         let athensTotal = 0;
         for (const conv of conversations) {
-            // דלג על ביטולים וכן על שיחות שסומנו ידנית כנפתרות
             if (conv.manuallyResolved) {
                 log.info(`Skipping ${conv.guestName} — manually resolved`);
                 continue;
             }
-            // ספור רק הזמנות פעילות — לא checkout שעבר יותר מיום
             const checkOutDate = conv.checkOut ? new Date(conv.checkOut) : null;
             const isActiveStay = !checkOutDate || checkOutDate >= new Date(now.getTime() - 24 * 60 * 60 * 1000);
             const isGreece = conv.country.toLowerCase() === "greece" || conv.country.toLowerCase() === "gr";
