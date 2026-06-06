@@ -7,6 +7,8 @@ import {
   getLastUnhappyIssue,
   getUnhappyThreadTs,
   recordUnhappyAlert,
+  isResolvedSlackSent,
+  markResolvedSlackSent,
   URGENCY_RANK,
 } from "../lib/memory.js";
 import { config } from "../config.js";
@@ -102,13 +104,19 @@ export async function handleUnhappy({
   }
 
   if (lastUrgency !== undefined && newRank < lastRank! && threadTs) {
-    await sendUnhappyResolved({
-      country: listing?.country ?? "",
-      guestName: reservation.guestName,
-      isFullyResolved: !sentiment.isUnhappy,
-      newUrgency: sentiment.isUnhappy ? sentiment.urgency : undefined,
-      threadTs,
-    });
+    const alreadySent = await isResolvedSlackSent(reservationId);
+    if (!alreadySent) {
+      await sendUnhappyResolved({
+        country: listing?.country ?? "",
+        guestName: reservation.guestName,
+        isFullyResolved: !sentiment.isUnhappy,
+        newUrgency: sentiment.isUnhappy ? sentiment.urgency : undefined,
+        threadTs,
+      });
+      await markResolvedSlackSent(reservationId);
+    } else {
+      log.info(`Resolved message already sent for ${reservation.guestName} — skipping`);
+    }
     await recordUnhappyAlert(reservationId, newUrgency);
   }
 }

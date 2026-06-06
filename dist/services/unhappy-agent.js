@@ -71,13 +71,20 @@ async function handleUnhappy({ reservationId, guestMessages, messageCount, reser
         return;
     }
     if (lastUrgency !== undefined && newRank < lastRank && threadTs) {
-        await (0, slack_js_1.sendUnhappyResolved)({
-            country: listing?.country ?? "",
-            guestName: reservation.guestName,
-            isFullyResolved: !sentiment.isUnhappy,
-            newUrgency: sentiment.isUnhappy ? sentiment.urgency : undefined,
-            threadTs,
-        });
+        const alreadySent = await (0, memory_js_1.isResolvedSlackSent)(reservationId);
+        if (!alreadySent) {
+            await (0, slack_js_1.sendUnhappyResolved)({
+                country: listing?.country ?? "",
+                guestName: reservation.guestName,
+                isFullyResolved: !sentiment.isUnhappy,
+                newUrgency: sentiment.isUnhappy ? sentiment.urgency : undefined,
+                threadTs,
+            });
+            await (0, memory_js_1.markResolvedSlackSent)(reservationId);
+        }
+        else {
+            log.info(`Resolved message already sent for ${reservation.guestName} — skipping`);
+        }
         await (0, memory_js_1.recordUnhappyAlert)(reservationId, newUrgency);
     }
 }

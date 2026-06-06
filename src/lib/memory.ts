@@ -14,13 +14,14 @@ interface ReservationMemory {
   sentOpportunities: string[];
   lastUnhappyUrgency?: Urgency;
   lastUnhappyIssue?: string;
-  lastUnhappyOpenedAt?: string;  // מתי הבעיה נפתחה
+  lastUnhappyOpenedAt?: string;
   unhappySlackTs?: string;
-  manuallyResolved?: boolean;    // סגירה ידנית על ידי הצוות
+  manuallyResolved?: boolean;
   manuallyResolvedAt?: string;
+  resolvedSlackSent?: boolean;
   wowSlackTs?: string;
   conversationMessages?: string;
-  conversationLastUpdated?: string; // מתי עודכנה השיחה לאחרונה
+  conversationLastUpdated?: string;
   guestName?: string;
   listingNickname?: string;
   country?: string;
@@ -96,6 +97,17 @@ export async function markManuallyResolved(reservationId: string): Promise<void>
   log.info(`Reservation ${reservationId} manually marked as resolved`);
 }
 
+export async function isResolvedSlackSent(reservationId: string): Promise<boolean> {
+  const data = await getRecord(reservationId);
+  return data.resolvedSlackSent === true;
+}
+
+export async function markResolvedSlackSent(reservationId: string): Promise<void> {
+  const data = await getRecord(reservationId);
+  data.resolvedSlackSent = true;
+  await setRecord(reservationId, data);
+}
+
 export async function recordUnhappyAlert(
   reservationId: string,
   urgency: Urgency,
@@ -107,15 +119,15 @@ export async function recordUnhappyAlert(
   if (slackTs) data.unhappySlackTs = slackTs;
   if (issue) {
     data.lastUnhappyIssue = issue;
-    // שמור מתי הבעיה נפתחה — רק אם זו בעיה חדשה
     if (!data.lastUnhappyOpenedAt || urgency === "resolved") {
       data.lastUnhappyOpenedAt = new Date().toISOString();
     }
   }
-  // אם נסגר — אפס את הסגירה הידנית
   if (urgency === "resolved") {
     data.manuallyResolved = false;
     data.lastUnhappyOpenedAt = undefined;
+  } else {
+    data.resolvedSlackSent = false;
   }
   await setRecord(reservationId, data);
   log.info(`Recorded unhappy alert for reservation ${reservationId} (urgency: ${urgency})`);
@@ -183,7 +195,6 @@ export async function getAllActiveConversations(sinceIso?: string): Promise<Arra
       const data = await redis.get<ReservationMemory>(key);
       if (!data?.conversationMessages || !data?.guestName) continue;
 
-      // מסנן הזמנות שהצ'ק-אאוט עבר יותר מ-2 ימים
       if (data.checkOut) {
         const checkOut = new Date(data.checkOut);
         const twoDaysAgo = new Date();
@@ -191,7 +202,6 @@ export async function getAllActiveConversations(sinceIso?: string): Promise<Arra
         if (checkOut < twoDaysAgo) continue;
       }
 
-      // אם יש פילטר לפי זמן — רק שיחות שעודכנו מאז, או שיש להן בעיה פעילה
       if (sinceIso && data.conversationLastUpdated) {
         const hasActiveIssue = data.lastUnhappyUrgency && data.lastUnhappyUrgency !== "resolved";
         const updatedAfter = new Date(data.conversationLastUpdated) > new Date(sinceIso);
@@ -223,7 +233,6 @@ export async function getAllActiveConversations(sinceIso?: string): Promise<Arra
   }
 }
 
-// מפתח לשמירת שעת הדוח הערבי האחרון
 const LAST_EVENING_REPORT_KEY = "meta:lastEveningReport";
 
 export async function setLastEveningReportTime(): Promise<void> {

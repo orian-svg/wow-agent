@@ -8,6 +8,8 @@ exports.getUnhappyThreadTs = getUnhappyThreadTs;
 exports.getLastUnhappyIssue = getLastUnhappyIssue;
 exports.isManuallyResolved = isManuallyResolved;
 exports.markManuallyResolved = markManuallyResolved;
+exports.isResolvedSlackSent = isResolvedSlackSent;
+exports.markResolvedSlackSent = markResolvedSlackSent;
 exports.recordUnhappyAlert = recordUnhappyAlert;
 exports.getWowThreadTs = getWowThreadTs;
 exports.recordWowAlert = recordWowAlert;
@@ -80,6 +82,15 @@ async function markManuallyResolved(reservationId) {
     await setRecord(reservationId, data);
     log.info(`Reservation ${reservationId} manually marked as resolved`);
 }
+async function isResolvedSlackSent(reservationId) {
+    const data = await getRecord(reservationId);
+    return data.resolvedSlackSent === true;
+}
+async function markResolvedSlackSent(reservationId) {
+    const data = await getRecord(reservationId);
+    data.resolvedSlackSent = true;
+    await setRecord(reservationId, data);
+}
 async function recordUnhappyAlert(reservationId, urgency, slackTs, issue) {
     const data = await getRecord(reservationId);
     data.lastUnhappyUrgency = urgency;
@@ -87,15 +98,16 @@ async function recordUnhappyAlert(reservationId, urgency, slackTs, issue) {
         data.unhappySlackTs = slackTs;
     if (issue) {
         data.lastUnhappyIssue = issue;
-        // שמור מתי הבעיה נפתחה — רק אם זו בעיה חדשה
         if (!data.lastUnhappyOpenedAt || urgency === "resolved") {
             data.lastUnhappyOpenedAt = new Date().toISOString();
         }
     }
-    // אם נסגר — אפס את הסגירה הידנית
     if (urgency === "resolved") {
         data.manuallyResolved = false;
         data.lastUnhappyOpenedAt = undefined;
+    }
+    else {
+        data.resolvedSlackSent = false;
     }
     await setRecord(reservationId, data);
     log.info(`Recorded unhappy alert for reservation ${reservationId} (urgency: ${urgency})`);
@@ -131,7 +143,6 @@ async function getAllActiveConversations(sinceIso) {
             const data = await redis.get(key);
             if (!data?.conversationMessages || !data?.guestName)
                 continue;
-            // מסנן הזמנות שהצ'ק-אאוט עבר יותר מ-2 ימים
             if (data.checkOut) {
                 const checkOut = new Date(data.checkOut);
                 const twoDaysAgo = new Date();
@@ -139,7 +150,6 @@ async function getAllActiveConversations(sinceIso) {
                 if (checkOut < twoDaysAgo)
                     continue;
             }
-            // אם יש פילטר לפי זמן — רק שיחות שעודכנו מאז, או שיש להן בעיה פעילה
             if (sinceIso && data.conversationLastUpdated) {
                 const hasActiveIssue = data.lastUnhappyUrgency && data.lastUnhappyUrgency !== "resolved";
                 const updatedAfter = new Date(data.conversationLastUpdated) > new Date(sinceIso);
@@ -170,7 +180,6 @@ async function getAllActiveConversations(sinceIso) {
         return [];
     }
 }
-// מפתח לשמירת שעת הדוח הערבי האחרון
 const LAST_EVENING_REPORT_KEY = "meta:lastEveningReport";
 async function setLastEveningReportTime() {
     try {
