@@ -14,7 +14,9 @@ function urgencyEmoji(urgency) {
         return "🟡";
     return "🟢";
 }
-function statusLabel(status, daysOpen) {
+function statusLabel(status, daysOpen, isLastWarning) {
+    if (isLastWarning)
+        return `⚠️ Final mention — will be auto-closed tomorrow if no update`;
     if (status === "open") {
         if (daysOpen === 0)
             return "Open — awaiting team response";
@@ -62,9 +64,15 @@ function shortTitle(issue, status) {
         return "✅ Resolved";
     if (status === "resolved_uncertain")
         return "⚠️ Resolved — follow up needed";
-    // מחלץ 4-5 מילים ראשונות מהבעיה ככותרת
     const words = issue.split(" ").slice(0, 5).join(" ");
     return words.length < issue.length ? `${words}...` : words;
+}
+function isLastWarningDay(openedAt, urgency) {
+    if (!openedAt)
+        return false;
+    const maxDays = memory_js_1.AUTO_CLOSE_DAYS[urgency] ?? 5;
+    const daysOpen = getDaysOpen(openedAt);
+    return daysOpen === maxDays - 1;
 }
 function buildReportText(country, cases, totalStays, reportType, dateStr) {
     const header = reportType === "evening"
@@ -82,10 +90,11 @@ function buildReportText(country, cases, totalStays, reportType, dateStr) {
         const openedStr = c.openedAt ? ` _(opened ${formatOpenedAt(c.openedAt)})_` : "";
         const daysOpen = getDaysOpen(c.openedAt);
         const title = shortTitle(c.issue, c.status);
+        const lastWarning = c.isLastWarning ?? false;
         lines.push(`${emoji} *${c.guestName}* — ${c.listingNickname}${openedStr}`);
         lines.push(`*${title}*`);
         lines.push(`Issue: ${c.issue}`);
-        lines.push(`Status: ${statusLabel(c.status, daysOpen)}`);
+        lines.push(`Status: ${statusLabel(c.status, daysOpen, lastWarning)}`);
         lines.push("");
     }
     lines.push(`Total active stays: ${totalStays} | Issues flagged: ${cases.length} | Open: ${open.length} | Needs follow-up: ${uncertain.length} | Resolved: ${confirmed.length}`);
@@ -130,6 +139,12 @@ async function sendDailyReport(reportType) {
                 log.info(`Skipping ${conv.guestName} — manually resolved`);
                 continue;
             }
+            // בדיקת סגירה אוטומטית
+            const autoCloseStatus = await (0, memory_js_1.autoCloseIfStale)(conv.reservationId);
+            if (autoCloseStatus === "closed") {
+                log.info(`Auto-closed stale case for ${conv.guestName}`);
+                continue;
+            }
             const checkOutDate = conv.checkOut ? new Date(conv.checkOut) : null;
             const isActiveStay = !checkOutDate || checkOutDate >= new Date(now.getTime() - 24 * 60 * 60 * 1000);
             const isGreece = conv.country.toLowerCase() === "greece" || conv.country.toLowerCase() === "gr";
@@ -152,11 +167,15 @@ async function sendDailyReport(reportType) {
             if (conv.lastUnhappyOpenedAt) {
                 caseResult.openedAt = conv.lastUnhappyOpenedAt;
             }
+            const isLastWarning = autoCloseStatus === "warning" &&
+                conv.lastUnhappyUrgency !== undefined &&
+                conv.lastUnhappyUrgency !== "resolved";
+            const enrichedCase = { ...caseResult, isLastWarning };
             if (isGreece) {
-                athensCases.push(caseResult);
+                athensCases.push(enrichedCase);
             }
             else {
-                israelCases.push(caseResult);
+                israelCases.push(enrichedCase);
             }
         }
         if (israelCases.length > 0 || reportType === "evening") {

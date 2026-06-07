@@ -31,6 +31,13 @@ interface ReservationMemory {
   lastUpdated?: string;
 }
 
+// כמה ימים עד סגירה אוטומטית לפי urgency
+export const AUTO_CLOSE_DAYS: Record<string, number> = {
+  high: 5,
+  medium: 3,
+  low: 2,
+};
+
 async function getRecord(reservationId: string): Promise<ReservationMemory> {
   try {
     const data = await redis.get<ReservationMemory>(`res:${reservationId}`);
@@ -131,6 +138,33 @@ export async function recordUnhappyAlert(
   }
   await setRecord(reservationId, data);
   log.info(`Recorded unhappy alert for reservation ${reservationId} (urgency: ${urgency})`);
+}
+
+export async function autoCloseIfStale(reservationId: string): Promise<"closed" | "warning" | "active"> {
+  const data = await getRecord(reservationId);
+  if (!data.lastUnhappyOpenedAt || !data.lastUnhappyUrgency || data.lastUnhappyUrgency === "resolved") return "active";
+  if (data.manuallyResolved) return "active";
+
+  const urgency = data.lastUnhappyUrgency;
+  const maxDays = AUTO_CLOSE_DAYS[urgency] ?? 5;
+  const opened = new Date(data.lastUnhappyOpenedAt);
+  const now = new Date();
+  const daysOpen = Math.floor((now.getTime() - opened.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (daysOpen >= maxDays) {
+    data.manuallyResolved = true;
+    data.manuallyResolvedAt = new Date().toISOString();
+    data.lastUnhappyUrgency = "resolved";
+    await setRecord(reservationId, data);
+    log.info(`Reservation ${reservationId} auto-closed after ${daysOpen} days`);
+    return "closed";
+  }
+
+  if (daysOpen === maxDays - 1) {
+    return "warning";
+  }
+
+  return "active";
 }
 
 export async function getWowThreadTs(reservationId: string): Promise<string | undefined> {

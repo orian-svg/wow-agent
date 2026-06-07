@@ -1,7 +1,7 @@
 import { createLogger } from "../lib/logger.js";
 import { analyzeGuestCase } from "./report.js";
 import type { GuestCaseStatus } from "./report.js";
-import { getAllActiveConversations, setLastEveningReportTime, getLastEveningReportTime } from "../lib/memory.js";
+import { getAllActiveConversations, setLastEveningReportTime, getLastEveningReportTime, autoCloseIfStale, AUTO_CLOSE_DAYS } from "../lib/memory.js";
 import { config } from "../config.js";
 
 const log = createLogger("daily-report");
@@ -14,7 +14,8 @@ function urgencyEmoji(urgency: "high" | "medium" | "low"): string {
   return "🟢";
 }
 
-function statusLabel(status: GuestCaseStatus["status"], daysOpen: number): string {
+function statusLabel(status: GuestCaseStatus["status"], daysOpen: number, isLastWarning: boolean): string {
+  if (isLastWarning) return `⚠️ Final mention — will be auto-closed tomorrow if no update`;
   if (status === "open") {
     if (daysOpen === 0) return "Open — awaiting team response";
     if (daysOpen === 1) return "Open — unresolved since yesterday";
@@ -56,14 +57,20 @@ function formatOpenedAt(isoString?: string): string {
 function shortTitle(issue: string, status: GuestCaseStatus["status"]): string {
   if (status === "resolved_confirmed") return "✅ Resolved";
   if (status === "resolved_uncertain") return "⚠️ Resolved — follow up needed";
-  // מחלץ 4-5 מילים ראשונות מהבעיה ככותרת
   const words = issue.split(" ").slice(0, 5).join(" ");
   return words.length < issue.length ? `${words}...` : words;
 }
 
+function isLastWarningDay(openedAt: string | undefined, urgency: string): boolean {
+  if (!openedAt) return false;
+  const maxDays = AUTO_CLOSE_DAYS[urgency] ?? 5;
+  const daysOpen = getDaysOpen(openedAt);
+  return daysOpen === maxDays - 1;
+}
+
 function buildReportText(
   country: string,
-  cases: GuestCaseStatus[],
+  cases: Array<GuestCaseStatus & { isLastWarning?: boolean }>,
   totalStays: number,
   reportType: "evening" | "morning",
   dateStr: string,
@@ -87,11 +94,12 @@ function buildReportText(
     const openedStr = c.openedAt ? ` _(opened ${formatOpenedAt(c.openedAt)})_` : "";
     const daysOpen = getDaysOpen(c.openedAt);
     const title = shortTitle(c.issue, c.status);
+    const lastWarning = c.isLastWarning ?? false;
 
     lines.push(`${emoji} *${c.guestName}* — ${c.listingNickname}${openedStr}`);
     lines.push(`*${title}*`);
     lines.push(`Issue: ${c.issue}`);
-    lines.push(`Status: ${statusLabel(c.status, daysOpen)}`);
+    lines.push(`Status: ${statusLabel(c.status, daysOpen, lastWarning)}`);
     lines.push("");
   }
 
@@ -134,8 +142,8 @@ export async function sendDailyReport(reportType: "evening" | "morning"): Promis
     const conversations = await getAllActiveConversations(sinceIso);
     log.info(`Found ${conversations.length} conversations for ${reportType} report`);
 
-    const israelCases: GuestCaseStatus[] = [];
-    const athensCases: GuestCaseStatus[] = [];
+    const israelCases: Array<GuestCaseStatus & { isLastWarning?: boolean }> = [];
+    const athensCases: Array<GuestCaseStatus & { isLastWarning?: boolean }> = [];
 
     const now = new Date();
     let israelTotal = 0;
@@ -144,6 +152,13 @@ export async function sendDailyReport(reportType: "evening" | "morning"): Promis
     for (const conv of conversations) {
       if (conv.manuallyResolved) {
         log.info(`Skipping ${conv.guestName} — manually resolved`);
+        continue;
+      }
+
+      // בדיקת סגירה אוטומטית
+      const autoCloseStatus = await autoCloseIfStale(conv.reservationId);
+      if (autoCloseStatus === "closed") {
+        log.info(`Auto-closed stale case for ${conv.guestName}`);
         continue;
       }
 
@@ -173,10 +188,16 @@ export async function sendDailyReport(reportType: "evening" | "morning"): Promis
         caseResult.openedAt = conv.lastUnhappyOpenedAt;
       }
 
+      const isLastWarning = autoCloseStatus === "warning" &&
+        conv.lastUnhappyUrgency !== undefined &&
+        conv.lastUnhappyUrgency !== "resolved";
+
+      const enrichedCase = { ...caseResult, isLastWarning };
+
       if (isGreece) {
-        athensCases.push(caseResult);
+        athensCases.push(enrichedCase);
       } else {
-        israelCases.push(caseResult);
+        israelCases.push(enrichedCase);
       }
     }
 

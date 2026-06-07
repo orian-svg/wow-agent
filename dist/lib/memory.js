@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.URGENCY_RANK = void 0;
+exports.URGENCY_RANK = exports.AUTO_CLOSE_DAYS = void 0;
 exports.getPastOpportunities = getPastOpportunities;
 exports.recordOpportunity = recordOpportunity;
 exports.getLastUnhappyUrgency = getLastUnhappyUrgency;
@@ -11,6 +11,7 @@ exports.markManuallyResolved = markManuallyResolved;
 exports.isResolvedSlackSent = isResolvedSlackSent;
 exports.markResolvedSlackSent = markResolvedSlackSent;
 exports.recordUnhappyAlert = recordUnhappyAlert;
+exports.autoCloseIfStale = autoCloseIfStale;
 exports.getWowThreadTs = getWowThreadTs;
 exports.recordWowAlert = recordWowAlert;
 exports.saveConversation = saveConversation;
@@ -24,6 +25,12 @@ const redis = new redis_1.Redis({
     url: process.env.UPSTASH_REDIS_REST_URL,
     token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
+// כמה ימים עד סגירה אוטומטית לפי urgency
+exports.AUTO_CLOSE_DAYS = {
+    high: 5,
+    medium: 3,
+    low: 2,
+};
 async function getRecord(reservationId) {
     try {
         const data = await redis.get(`res:${reservationId}`);
@@ -111,6 +118,30 @@ async function recordUnhappyAlert(reservationId, urgency, slackTs, issue) {
     }
     await setRecord(reservationId, data);
     log.info(`Recorded unhappy alert for reservation ${reservationId} (urgency: ${urgency})`);
+}
+async function autoCloseIfStale(reservationId) {
+    const data = await getRecord(reservationId);
+    if (!data.lastUnhappyOpenedAt || !data.lastUnhappyUrgency || data.lastUnhappyUrgency === "resolved")
+        return "active";
+    if (data.manuallyResolved)
+        return "active";
+    const urgency = data.lastUnhappyUrgency;
+    const maxDays = exports.AUTO_CLOSE_DAYS[urgency] ?? 5;
+    const opened = new Date(data.lastUnhappyOpenedAt);
+    const now = new Date();
+    const daysOpen = Math.floor((now.getTime() - opened.getTime()) / (1000 * 60 * 60 * 24));
+    if (daysOpen >= maxDays) {
+        data.manuallyResolved = true;
+        data.manuallyResolvedAt = new Date().toISOString();
+        data.lastUnhappyUrgency = "resolved";
+        await setRecord(reservationId, data);
+        log.info(`Reservation ${reservationId} auto-closed after ${daysOpen} days`);
+        return "closed";
+    }
+    if (daysOpen === maxDays - 1) {
+        return "warning";
+    }
+    return "active";
 }
 async function getWowThreadTs(reservationId) {
     const data = await getRecord(reservationId);
